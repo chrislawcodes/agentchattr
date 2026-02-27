@@ -25,7 +25,7 @@ See [WORKFLOW.md](WORKFLOW.md) for the full process.
 ---
 
 ### Session resume on restart
-- **Owner:** In Progress - codex
+- **Owner:** Review - codex (implemented by gemini-cli, PR open on feature/session-resume)
 - **Scope:** `wrapper.py` — use each agent's `resume_flag` from config to resume the previous session on restart instead of starting cold
 - **Acceptance criteria:** Restarting `start_gemini.sh` resumes the last Gemini session; same for Claude and Codex
 - **Test plan:** Unit test that `run_agent` constructs the correct resume command; manual smoke test
@@ -34,7 +34,7 @@ See [WORKFLOW.md](WORKFLOW.md) for the full process.
 ---
 
 ### Stale queue file cleanup on startup
-- **Owner:** Pending
+- **Owner:** In Progress - gemini-cli
 - **Scope:** `wrapper.py` — flush (truncate) the agent's queue `.jsonl` file at startup to prevent leftover entries from a previous crashed session firing unexpectedly
 - **Acceptance criteria:** Starting a wrapper with a non-empty queue file does not trigger spurious injections
 - **Test plan:** Unit test with a pre-populated queue file; verify it is cleared before the watcher starts
@@ -48,6 +48,15 @@ See [WORKFLOW.md](WORKFLOW.md) for the full process.
 - **Acceptance criteria:** Windows inject function sends Escape → text → Enter, matching unix behavior; existing windows tests (if any) pass
 - **Test plan:** Unit test mirroring `test_inject_sends_escape_before_text` for the windows inject path
 - **Branch:** fix/windows-wrapper-parity
+
+---
+
+### "Working" indicator in chat UI
+- **Owner:** In Progress - codex
+- **Scope:** Show a `…` or "active" status next to an agent's name in the chat UI while they are processing a task
+- **Acceptance criteria:** Agent status pill shows activity when processing; returns to normal when idle
+- **Test plan:** Manual UI test; unit test for backend status endpoint if applicable
+- **Branch:** feature/working-indicator
 
 ---
 
