@@ -34,7 +34,7 @@ See [WORKFLOW.md](WORKFLOW.md) for the full process.
 ---
 
 ### Stale queue file cleanup on startup
-- **Owner:** Review - gemini-cli
+- **Owner:** Done
 - **Scope:** `wrapper.py` — flush (truncate) the agent's queue `.jsonl` file at startup to prevent leftover entries from a previous crashed session firing unexpectedly
 - **Acceptance criteria:** Starting a wrapper with a non-empty queue file does not trigger spurious injections
 - **Test plan:** Unit test with a pre-populated queue file; verify it is cleared before the watcher starts
@@ -106,7 +106,7 @@ See [WORKFLOW.md](WORKFLOW.md) for the full process.
 ---
 
 ### `/history` command — cross-session message history
-- **Owner:** Review - codex (implemented by gemini-cli, PR open #4)
+- **Owner:** Done
 - **Scope:** Add a `/history [n]` command that returns the last N messages from the persistent store, including messages from previous sessions
 - **Acceptance criteria:** `/history 20` returns the 20 most recent messages regardless of when the server started
 - **Test plan:** Unit test store retrieval; manual test across a server restart
@@ -115,7 +115,7 @@ See [WORKFLOW.md](WORKFLOW.md) for the full process.
 ---
 
 ### Automated stale tmux session cleanup
-- **Owner:** Review - codex (implemented by gemini-cli, PR open #5)
+- **Owner:** Done
 - **Scope:** Add logic to detect and kill tmux sessions for agents that have been offline for > N minutes (configurable)
 - **Acceptance criteria:** Dead sessions are cleaned up automatically; active sessions are untouched
 - **Test plan:** Unit test session detection logic with mocked tmux output
