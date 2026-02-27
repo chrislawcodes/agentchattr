@@ -27,6 +27,7 @@ from pathlib import Path
 ROOT = Path(__file__).parent
 
 SERVER_NAME = "agentchattr"
+DEFAULT_TRIGGER_COOLDOWN_SECONDS = 2.0
 
 # ---------------------------------------------------------------------------
 # MCP auto-config — ensure .mcp.json and .gemini/settings.json exist
@@ -101,8 +102,20 @@ def _notify_recovery(data_dir: Path, agent_name: str):
         pass
 
 
-def _queue_watcher(queue_file: Path, agent_name: str, inject_fn):
+def _trigger_cooldown_seconds(agent_name: str, agent_cfg: dict) -> float:
+    """Per-agent debounce to avoid spamming interactive CLIs with repeated wake commands.
+
+    Reads 'trigger_cooldown' from the agent's config section (config.toml).
+    Falls back to DEFAULT_TRIGGER_COOLDOWN_SECONDS if not set.
+    """
+    return float(agent_cfg.get("trigger_cooldown", DEFAULT_TRIGGER_COOLDOWN_SECONDS))
+
+
+def _queue_watcher(queue_file: Path, agent_name: str, inject_fn, agent_cfg: dict):
     """Poll queue file; call inject_fn('chat - use mcp') when triggered."""
+    last_inject_at = 0.0
+    cooldown = _trigger_cooldown_seconds(agent_name, agent_cfg)
+
     while True:
         try:
             if queue_file.exists() and queue_file.stat().st_size > 0:
@@ -122,9 +135,16 @@ def _queue_watcher(queue_file: Path, agent_name: str, inject_fn):
                         pass
 
                 if has_trigger:
+                    # Debounce wake-ups so slower TUIs (notably Gemini CLI)
+                    # can finish MCP prompts before the next injected command.
+                    now = time.time()
+                    elapsed = now - last_inject_at
+                    if elapsed < cooldown:
+                        time.sleep(cooldown - elapsed)
                     # Small delay to let the TUI settle
                     time.sleep(0.5)
                     inject_fn("chat - use mcp")
+                    last_inject_at = time.time()
         except Exception:
             pass  # Silently continue — monitor will restart if thread dies
 
@@ -170,7 +190,7 @@ def main():
     resolved = shutil.which(command)
     if not resolved:
         print(f"  Error: '{command}' not found on PATH.")
-        print(f"  Install it first, then try again.")
+        print("  Install it first, then try again.")
         sys.exit(1)
     command = resolved
 
@@ -187,7 +207,7 @@ def main():
         nonlocal _watcher_inject_fn, _watcher_thread
         _watcher_inject_fn = inject_fn
         _watcher_thread = threading.Thread(
-            target=_queue_watcher, args=(queue_file, agent, inject_fn), daemon=True
+            target=_queue_watcher, args=(queue_file, agent, inject_fn, agent_cfg), daemon=True
         )
         _watcher_thread.start()
 
@@ -198,7 +218,7 @@ def main():
             time.sleep(5)
             if _watcher_thread and not _watcher_thread.is_alive() and _watcher_inject_fn:
                 _watcher_thread = threading.Thread(
-                    target=_queue_watcher, args=(queue_file, agent, _watcher_inject_fn), daemon=True
+                    target=_queue_watcher, args=(queue_file, agent, _watcher_inject_fn, agent_cfg), daemon=True
                 )
                 _watcher_thread.start()
                 _notify_recovery(data_dir, agent)
