@@ -1,7 +1,7 @@
 # PRD: Remote Mobile Chat Access
 
-**Status:** Draft — pending user review
-**Author:** Claude (Coordinator)
+**Status:** Draft v2 — pending user review
+**Author:** Claude (Coordinator), reviewed by Gemini & Codex
 **Last updated:** 2026-02-27
 
 ---
@@ -12,7 +12,7 @@ The agentchattr chat is currently only accessible on the local machine where the
 
 ## Goal
 
-Deploy the agentchattr server to Railway so that the chat UI is accessible remotely from any device, including mobile browsers.
+Enable the user to access the agentchattr chat from a mobile device (iPhone) and send messages to agents remotely.
 
 ## Non-Goals
 
@@ -25,55 +25,99 @@ Deploy the agentchattr server to Railway so that the chat UI is accessible remot
 
 ## User Stories
 
-1. **As the user**, I want to open a URL on my iPhone and see the live agent chat, so I can monitor what the agents are doing without being at my desk.
-2. **As the user**, I want to send messages to agents from my phone, so I can give direction or unblock them remotely.
-3. **As the user**, I want the chat to be protected so that only I can access it (basic auth or secret URL token), so random people can't trigger agent actions.
+1. **As the user**, I want to see the live agent chat on my iPhone, so I can monitor what the agents are doing without being at my desk.
+2. **As the user**, I want to send messages and @mention agents from my phone, so I can give direction or unblock them remotely.
+3. **As the user**, I want access to be protected so that only I can trigger agent actions.
 
 ---
 
-## Requirements
+## Architecture Note (Critical)
 
-### Functional
-- [ ] Chat UI accessible at a public HTTPS URL
-- [ ] Real-time message updates work on mobile browsers (existing SSE/WebSocket mechanism)
-- [ ] Can send messages and @mention agents from mobile
-- [ ] Agent status indicators visible on mobile
-
-### Security
-- [ ] Access protected by at least one of:
-  - HTTP Basic Auth (username + password via Railway env var)
-  - Secret URL token (e.g. `?token=xxx`)
-- [ ] HTTPS enforced (Railway provides this automatically)
-
-### Infrastructure
-- [ ] Deployed on Railway (user has existing account)
-- [ ] Low-volume: < 10 concurrent users, < 1000 messages/day
-- [ ] Server listens on `PORT` env var (Railway requirement)
-- [ ] MCP server (port 8200/8201) does NOT need to be public — agents run locally, only the chat UI is remote
-- [ ] Graceful handling of agent unavailability when running remotely
-
-### Mobile UX
-- [ ] Chat UI is responsive / usable on small screens
-- [ ] Input field works with mobile keyboard
-- [ ] No horizontal scrolling on mobile
+The agents (Claude, Codex, Gemini) read local queue files (`./data/*_queue.jsonl`) to know when to act. Any solution where the chat server moves off the local machine must account for this — otherwise agents won't receive remote messages.
 
 ---
 
-## Open Questions for User Review
+## Options
 
-1. **Auth method preference:** Simple secret URL token (easiest) or HTTP Basic Auth (more standard)?
-2. **Agent connectivity:** When you access chat remotely, the agents (Claude/Codex/Gemini) are still running locally. Do you want remote messages to @mention them, or is remote access read-only?
-3. **Persistence:** Should messages be stored so you can see history from before you connected, or is live-only sufficient?
-4. **Railway region:** Any preference, or default (US)?
+### Option A — ngrok or Tailscale (Recommended to start)
+
+Expose the locally-running server to the internet via a tunnel.
+
+**How it works:**
+- Run `ngrok http 8300` (or Tailscale) on your Mac
+- Get a public HTTPS URL (e.g. `https://abc123.ngrok.io`)
+- Access it from any device
+
+**Pros:**
+- Zero code changes
+- Works today with one command
+- Agents work exactly as now (queue files are still local)
+- HTTPS included
+
+**Cons:**
+- Requires your Mac to be on and ngrok running
+- ngrok free tier has a changing URL on each restart (paid plan or Tailscale gives a stable URL)
+
+**Scope:** None (setup only) — optionally add auth token to `app.py` (~20 lines)
 
 ---
 
-## Proposed Implementation (to be approved before work starts)
+### Option B — Slack Integration
 
-1. Add `PORT` env var support to `run.py` (Railway injects this)
-2. Add lightweight auth middleware to `app.py` (token or basic auth via env var)
-3. Make chat UI responsive for mobile (CSS tweaks to `static/`)
-4. Add `railway.json` or `Procfile` for Railway deployment config
-5. Update `README.md` with Railway deployment instructions
+A bridge script relays messages between a Slack channel and agentchattr.
 
-**Estimated scope:** Small — 3-4 files, no major architectural changes.
+**How it works:**
+- Create a Slack app with a bot token
+- Small Python bridge (~150 lines) listens to Slack via Events API or Socket Mode
+- Messages from Slack → forwarded to agentchattr queue files (agents respond normally)
+- Agent responses → posted back to Slack channel
+
+**Pros:**
+- Use the Slack mobile app you already have
+- Full message history via Slack's native history
+- No public URL needed (Socket Mode works without inbound firewall rules)
+- Works on any device with Slack
+
+**Cons:**
+- Requires a Slack workspace
+- ~150-line bridge script to write and maintain
+- Slack API rate limits (generous for low volume)
+
+**Scope:** Medium — new `slack_bridge.py`, Slack app config, `config.toml` entry
+
+---
+
+### Option C — Railway Deployment (Requires architecture rewrite)
+
+Host the chat server on Railway; rewrite agents to poll Railway via HTTP.
+
+**How it works:**
+- Railway hosts `run.py` (chat server)
+- `wrapper.py` rewritten to poll Railway API instead of reading local files
+- Full remote server, Mac doesn't need to be on
+
+**Pros:**
+- Fully cloud-hosted, Mac can be off
+- Stable URL
+
+**Cons:**
+- Major rewrite of `wrapper.py` (agents currently use local file queues)
+- Ongoing Railway hosting cost
+- Significantly more complex
+
+**Scope:** Large — estimated 2-4 days MVP, 1-2 weeks production-grade
+
+---
+
+## Recommendation
+
+**Start with Option A (ngrok)** to get mobile access immediately with zero code. If you want persistent, always-on access without your Mac, **Option B (Slack)** is the next step — it avoids the architecture rewrite of Option C.
+
+---
+
+## Open Questions for User
+
+1. **Which option?** A (ngrok now), B (Slack integration), C (Railway), or start with A and plan B?
+2. **Auth:** If Option A, do you want a secret URL token to protect access?
+3. **Slack workspace:** If Option B, do you have a workspace to use?
+4. **Always-on requirement:** Does your Mac stay on when you want remote access, or do you need the server to run independently?
