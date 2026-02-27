@@ -37,15 +37,15 @@ def test_cooldown_falls_back_when_key_missing():
 # ---------------------------------------------------------------------------
 
 def test_inject_sends_escape_before_text():
-    """Clear line and Escape must be sent before the literal text to clear pending TUI input."""
+    """Escape must be sent before the literal text to clear pending TUI input."""
     with patch("subprocess.run") as mock_run:
         from wrapper_unix import inject
         inject("chat - use mcp", tmux_session="test-session")
 
     calls = mock_run.call_args_list
-    assert len(calls) == 4, f"Expected 4 subprocess calls, got {len(calls)}"
+    assert len(calls) == 4, f"Expected 4 subprocess calls (C-u, Escape, text, Enter), got {len(calls)}"
 
-    # First call: C-u (clear line)
+    # First call: C-u (line clear)
     first_cmd = calls[0][0][0]
     assert "C-u" in first_cmd, f"First call should send C-u, got: {first_cmd}"
 
