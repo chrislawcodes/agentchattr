@@ -78,6 +78,15 @@ See [WORKFLOW.md](WORKFLOW.md) for the full process.
 
 ---
 
+### @user mentions filter
+- **Owner:** Pending - gemini-cli (after ngrok docs)
+- **Scope:** `static/` — add a filter button/tab to the chat UI showing only messages that @mention the user, with an unread badge count
+- **Acceptance criteria:** Clicking the filter shows only @user messages; badge shows count of unseen @mentions; clicking a mention scrolls to it
+- **Test plan:** Manual UI test; works on mobile viewport
+- **Branch:** feature/user-mentions-filter
+
+---
+
 ### `/status` command — agent health check
 - **Owner:** Pending
 - **Scope:** Add a `/status` slash command (or equivalent API endpoint) that reports each agent's online status, last-seen time, and queue depth
