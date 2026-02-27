@@ -307,6 +307,37 @@ Auto-trigger works on all platforms:
 
 The chat server and web UI are fully cross-platform (Python + browser).
 
+## Accessing Remotely (via ngrok)
+
+If you want to access your chat UI from a mobile device or a remote machine while leaving the agents running on your local Mac/PC:
+
+1. **Install ngrok:**
+   ```bash
+   brew install ngrok  # macOS
+   # or download from ngrok.com
+   ```
+
+2. **Start ngrok tunnel:**
+   ```bash
+   ngrok http 8300
+   ```
+
+3. **Secure your tunnel (Recommended):**
+   To prevent anyone with your ngrok URL from accessing your agents, set an `ACCESS_TOKEN` environment variable before starting the chat server:
+   ```bash
+   # Mac/Linux
+   export ACCESS_TOKEN=your_secret_password
+   sh start_claude.sh
+
+   # Windows
+   set ACCESS_TOKEN=your_secret_password
+   start_claude.bat
+   ```
+
+4. **Access from mobile:**
+   Open the HTTPS URL provided by ngrok on your phone and append your token as a query parameter:
+   `https://your-unique-id.ngrok-free.app?token=your_secret_password`
+
 ## Security
 
 agentchattr is designed for **localhost use only** and includes several protections:
