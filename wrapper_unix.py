@@ -32,12 +32,20 @@ def _check_tmux():
 
 def inject(text: str, *, tmux_session: str):
     """Send text + Enter to a tmux session via send-keys."""
+    # Send Escape first to clear any pending/stacked input in the TUI.
+    # This prevents multiple rapid triggers from piling up in the input field
+    # without submitting (observed with Gemini CLI).
+    subprocess.run(
+        ["tmux", "send-keys", "-t", tmux_session, "Escape"],
+        capture_output=True,
+    )
     # Use -l to send text literally (avoids misinterpreting as key names),
     # then send Enter as a separate key press
     subprocess.run(
         ["tmux", "send-keys", "-t", tmux_session, "-l", text],
         capture_output=True,
     )
+    # Enter submits prompt input for supported CLIs in this setup.
     subprocess.run(
         ["tmux", "send-keys", "-t", tmux_session, "Enter"],
         capture_output=True,

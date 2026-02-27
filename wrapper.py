@@ -27,6 +27,8 @@ from pathlib import Path
 ROOT = Path(__file__).parent
 
 SERVER_NAME = "agentchattr"
+DEFAULT_TRIGGER_COOLDOWN_SECONDS = 2.0
+GEMINI_TRIGGER_COOLDOWN_SECONDS = 10.0
 
 # ---------------------------------------------------------------------------
 # MCP auto-config — ensure .mcp.json and .gemini/settings.json exist
@@ -101,8 +103,18 @@ def _notify_recovery(data_dir: Path, agent_name: str):
         pass
 
 
+def _trigger_cooldown_seconds(agent_name: str) -> float:
+    """Per-agent debounce to avoid spamming interactive CLIs with repeated wake commands."""
+    if agent_name.lower() == "gemini":
+        return GEMINI_TRIGGER_COOLDOWN_SECONDS
+    return DEFAULT_TRIGGER_COOLDOWN_SECONDS
+
+
 def _queue_watcher(queue_file: Path, agent_name: str, inject_fn):
     """Poll queue file; call inject_fn('chat - use mcp') when triggered."""
+    last_inject_at = 0.0
+    cooldown = _trigger_cooldown_seconds(agent_name)
+
     while True:
         try:
             if queue_file.exists() and queue_file.stat().st_size > 0:
@@ -122,9 +134,16 @@ def _queue_watcher(queue_file: Path, agent_name: str, inject_fn):
                         pass
 
                 if has_trigger:
+                    # Debounce wake-ups so slower TUIs (notably Gemini CLI)
+                    # can finish MCP prompts before the next injected command.
+                    now = time.time()
+                    elapsed = now - last_inject_at
+                    if elapsed < cooldown:
+                        time.sleep(cooldown - elapsed)
                     # Small delay to let the TUI settle
                     time.sleep(0.5)
                     inject_fn("chat - use mcp")
+                    last_inject_at = time.time()
         except Exception:
             pass  # Silently continue — monitor will restart if thread dies
 

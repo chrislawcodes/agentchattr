@@ -30,4 +30,4 @@ if ! lsof -i :8300 -sTCP:LISTEN >/dev/null 2>&1 && \
     done
 fi
 
-python wrapper.py codex
+python wrapper.py codex --full-auto
