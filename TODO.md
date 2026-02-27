@@ -43,7 +43,7 @@ See [WORKFLOW.md](WORKFLOW.md) for the full process.
 ---
 
 ### Windows wrapper parity (Escape-before-inject)
-- **Owner:** Review - codex (implemented by gemini-cli, PR #4 open)
+- **Owner:** Done
 - **Scope:** `wrapper_windows.py` — add the same Escape keystroke before injection that was added to `wrapper_unix.py` in PR #1
 - **Acceptance criteria:** Windows inject function sends Escape → text → Enter, matching unix behavior; existing windows tests (if any) pass
 - **Test plan:** Unit test mirroring `test_inject_sends_escape_before_text` for the windows inject path
@@ -70,7 +70,7 @@ See [WORKFLOW.md](WORKFLOW.md) for the full process.
 ---
 
 ### ngrok setup docs
-- **Owner:** Review - codex (implemented by gemini-cli, PR #6 open)
+- **Owner:** Done
 - **Scope:** `README.md` — add ngrok installation, startup command, and `ACCESS_TOKEN` usage instructions
 - **Acceptance criteria:** A new user can follow README to get mobile access in < 5 min
 - **Test plan:** Walkthrough review
@@ -88,7 +88,7 @@ See [WORKFLOW.md](WORKFLOW.md) for the full process.
 ---
 
 ### @user mentions filter
-- **Owner:** Review - codex (implemented by gemini-cli, PR #5 open)
+- **Owner:** Done
 - **Scope:** `static/` — add a filter button/tab to the chat UI showing only messages that @mention the user, with an unread badge count
 - **Acceptance criteria:** Clicking the filter shows only @user messages; badge shows count of unseen @mentions; clicking a mention scrolls to it
 - **Test plan:** Manual UI test; works on mobile viewport
