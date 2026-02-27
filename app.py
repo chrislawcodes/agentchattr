@@ -358,6 +358,23 @@ async def websocket_endpoint(websocket: WebSocket):
                     await broadcast_clear()
                     continue
 
+                # /status command
+                if text.lower() == "/status":
+                    status = agents.get_status()
+                    lines = ["**Agent Status:**"]
+                    for name, info in status.items():
+                        if name == "paused": continue
+                        pill = "🟢" if info.get("available") else "⬜"
+                        if info.get("busy"): pill = "⏳"
+                        label = config.get("agents", {}).get(name, {}).get("label", name)
+                        lines.append(f"{pill} **{label}**: {'Busy' if info.get('busy') else 'Available' if info.get('available') else 'Offline'}")
+                    
+                    lines.append(f"\n**Loop Guard:** {'Paused (type /continue to resume)' if router.is_paused else 'Active'}")
+                    lines.append(f"**Hops:** {router._hop_count} / {router.max_hops}")
+                    
+                    store.add("system", "\n".join(lines))
+                    continue
+
                 # /roastreview command
                 if text.lower() == "/roastreview":
                     agents = list(config.get("agents", {}).keys())

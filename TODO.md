@@ -97,7 +97,7 @@ See [WORKFLOW.md](WORKFLOW.md) for the full process.
 ---
 
 ### `/status` command — agent health check
-- **Owner:** Review - codex (implemented by gemini-cli, PR #7 open)
+- **Owner:** Done
 - **Scope:** Add a `/status` slash command (or equivalent API endpoint) that reports each agent's online status, last-seen time, and queue depth
 - **Acceptance criteria:** Typing `/status` in the chat UI returns a health summary for all configured agents
 - **Test plan:** Unit test the status logic; integration test via the API endpoint
