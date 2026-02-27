@@ -363,9 +363,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     status = agents.get_status()
                     lines = ["**Agent Status:**"]
                     for name, info in status.items():
-                        if name == "paused": continue
+                        if name == "paused":
+                            continue
                         pill = "🟢" if info.get("available") else "⬜"
-                        if info.get("busy"): pill = "⏳"
+                        if info.get("busy"):
+                            pill = "⏳"
                         label = config.get("agents", {}).get(name, {}).get("label", name)
                         lines.append(f"{pill} **{label}**: {'Busy' if info.get('busy') else 'Available' if info.get('available') else 'Offline'}")
                     
