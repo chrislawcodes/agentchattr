@@ -668,6 +668,7 @@ function setupKeyboardShortcuts() {
 
 const SLASH_COMMANDS = [
     { cmd: '/status', desc: 'Check the health and latency of all agents' },
+    { cmd: '/history', desc: 'Show recent message history' },
     { cmd: '/roastreview', desc: 'Get all agents to review and roast each other\'s work' },
     { cmd: '/poetry haiku', desc: 'Agents write a haiku about the codebase' },
     { cmd: '/poetry limerick', desc: 'Agents write a limerick about the codebase' },
