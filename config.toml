@@ -1,0 +1,42 @@
+[server]
+port = 8300
+host = "127.0.0.1"
+data_dir = "./data"
+
+# Add agents here. Each gets a status pill, @mention routing, and color.
+# "cwd" is the working directory for the agent's terminal session.
+# "command" is the CLI command used to resume sessions.
+
+[agents.claude]
+command = "claude"
+cwd = ".."
+color = "#da7756"
+label = "Claude"
+resume_flag = "--resume"
+
+[agents.codex]
+command = "codex"
+cwd = ".."
+color = "#10a37f"
+label = "Codex"
+resume_flag = "exec resume"
+
+[agents.gemini]
+command = "gemini"
+cwd = ".."
+color = "#4285f4"
+label = "Gemini"
+resume_flag = "--resume"
+
+[routing]
+# "none" = only route on explicit @mention. "all" = route to all agents by default.
+default = "none"
+max_agent_hops = 4
+
+[mcp]
+http_port = 8200
+sse_port = 8201
+
+[images]
+upload_dir = "./uploads"
+max_size_mb = 10

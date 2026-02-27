@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>agentchattr</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div id="app">
+        <header>
+            <div class="header-left">
+                <h1 id="room-title">agentchattr</h1>
+                <span class="subtitle" id="room-subtitle"></span>
+            </div>
+            <div class="header-right">
+                <div id="agent-status"></div>
+                <button class="settings-btn" id="pins-toggle" onclick="togglePinsPanel()" title="Todos">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <rect x="2" y="2" width="12" height="12" rx="2" stroke="currentColor" stroke-width="1.2"/>
+                        <path d="M5 8L7 10L11 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                    </svg>
+                </button>
+                <button class="settings-btn" id="settings-toggle" onclick="toggleSettings()" title="Settings">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <path d="M6.5 1L7.1 3.1C7.4 3.2 7.7 3.4 8 3.6L10 2.8L11.5 5.4L9.8 6.7C9.8 7 9.8 7.3 9.8 7.6L11.5 8.9L10 11.5L8 10.7C7.7 10.9 7.4 11 7.1 11.2L6.5 13.3H3.5L2.9 11.2C2.6 11 2.3 10.9 2 10.7L0 11.5L-1.5 8.9L0.2 7.6C0.2 7.3 0.2 7 0.2 6.7L-1.5 5.4L0 2.8L2 3.6C2.3 3.4 2.6 3.2 2.9 3.1L3.5 1H6.5Z" transform="translate(3 1)" stroke="currentColor" stroke-width="1.2" fill="none"/>
+                        <circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.2" fill="none"/>
+                    </svg>
+                </button>
+            </div>
+        </header>
+
+        <div id="settings-bar" class="hidden">
+            <div class="settings-field">
+                <label for="setting-username">Name</label>
+                <input type="text" id="setting-username" placeholder="your name" maxlength="20">
+            </div>
+            <div class="settings-field">
+                <label for="setting-title">Room</label>
+                <input type="text" id="setting-title" placeholder="agentchattr" maxlength="60">
+            </div>
+            <div class="settings-field">
+                <label for="setting-font">Font</label>
+                <select id="setting-font">
+                    <option value="mono">Monospace</option>
+                    <option value="sans">Sans</option>
+                </select>
+            </div>
+            <div class="settings-field">
+                <label for="setting-hops">Loop guard</label>
+                <input type="number" id="setting-hops" min="1" max="50" value="4" title="Max agent-to-agent hops before pausing">
+            </div>
+            <button class="settings-save" onclick="saveSettings()">Save</button>
+            <span class="settings-spacer"></span>
+            <button class="settings-danger" onclick="clearChat()">Clear Chat</button>
+        </div>
+
+        <div id="pins-panel" class="hidden">
+            <div class="pins-header">
+                <span>Todos</span>
+                <button onclick="togglePinsPanel()" class="pins-close">&times;</button>
+            </div>
+            <div id="pins-list"></div>
+        </div>
+
+        <main id="timeline">
+            <div id="messages"></div>
+            <div id="typing-indicator" class="hidden">
+                <span class="typing-name"></span> is thinking...
+            </div>
+        </main>
+
+        <div id="scroll-anchor" class="hidden" onclick="scrollToBottom()"><span class="unread-badge">0</span><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8l5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+
+        <footer>
+            <div id="mention-toggles"></div>
+            <div id="attachments"></div>
+            <div id="input-row">
+                <span id="sender-label" class="sender-label">user</span>
+                <textarea id="input"
+                    placeholder="Type a message... (use @name to mention agents)"
+                    rows="1"
+                    autofocus></textarea>
+                <button id="mic" onclick="toggleVoice()" title="Voice typing (local speech-to-text)">
+                    <svg id="mic-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                        <line x1="12" y1="19" x2="12" y2="23"/>
+                        <line x1="8" y1="23" x2="16" y2="23"/>
+                    </svg>
+                </button>
+                <button id="send" onclick="sendMessage()">Send</button>
+            </div>
+            <div class="input-hint">
+                Enter to send &middot; Shift+Enter for newline &middot; Paste/drop images &middot; Mic for voice &middot; /continue to resume after loop guard
+            </div>
+        </footer>
+    </div>
+
+    <div id="dropzone" class="hidden">
+        <div class="dropzone-inner">Drop image here</div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="/static/chat.js"></script>
+</body>
+</html>
+
