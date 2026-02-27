@@ -35,6 +35,10 @@ def inject(text: str, *, tmux_session: str):
     # Send Escape first to clear any pending/stacked input in the TUI.
     # This prevents multiple rapid triggers from piling up in the input field
     # without submitting (observed with Gemini CLI).
+    # Note: Escape is a soft clear — it dismisses autocomplete/history popups
+    # and returns to a blank prompt. It will not interrupt an in-progress
+    # model response. If the agent is mid-response, the inject will be queued
+    # naturally by the per-agent trigger_cooldown in wrapper.py.
     subprocess.run(
         ["tmux", "send-keys", "-t", tmux_session, "Escape"],
         capture_output=True,

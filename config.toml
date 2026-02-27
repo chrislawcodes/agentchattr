@@ -13,6 +13,7 @@ cwd = ".."
 color = "#da7756"
 label = "Claude"
 resume_flag = "--resume"
+trigger_cooldown = 2.0
 
 [agents.codex]
 command = "codex"
@@ -20,6 +21,7 @@ cwd = ".."
 color = "#10a37f"
 label = "Codex"
 resume_flag = "exec resume"
+trigger_cooldown = 2.0
 
 [agents.gemini]
 command = "gemini"
@@ -27,6 +29,7 @@ cwd = ".."
 color = "#4285f4"
 label = "Gemini"
 resume_flag = "--resume"
+trigger_cooldown = 10.0
 
 [routing]
 # "none" = only route on explicit @mention. "all" = route to all agents by default.
