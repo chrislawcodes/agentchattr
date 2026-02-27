@@ -43,7 +43,7 @@ See [WORKFLOW.md](WORKFLOW.md) for the full process.
 ---
 
 ### Windows wrapper parity (Escape-before-inject)
-- **Owner:** Review - codex (implemented by gemini-cli, PR #4 open)
+- **Owner:** Done
 - **Scope:** `wrapper_windows.py` — add the same Escape keystroke before injection that was added to `wrapper_unix.py` in PR #1
 - **Acceptance criteria:** Windows inject function sends Escape → text → Enter, matching unix behavior; existing windows tests (if any) pass
 - **Test plan:** Unit test mirroring `test_inject_sends_escape_before_text` for the windows inject path
@@ -60,6 +60,15 @@ See [WORKFLOW.md](WORKFLOW.md) for the full process.
 
 ---
 
+### @user mentions filter (Inbox)
+- **Owner:** In Progress - gemini-cli
+- **Scope:** `static/` — add a filter button/tab to the chat UI showing only messages that @mention the user, with an unread badge count
+- **Acceptance criteria:** Clicking the filter shows only @user messages; badge shows count of unresolved @mentions; clicking a mention scrolls to it
+- **Test plan:** Manual UI test; works on mobile viewport
+- **Branch:** feature/user-mentions-filter
+
+---
+
 ### ngrok secret token auth
 - **Owner:** Pending - codex (after PR reviews)
 - **Scope:** `app.py` — read `ACCESS_TOKEN` env var; reject requests missing `?token=<value>` when set; no change to local-only usage
@@ -70,11 +79,20 @@ See [WORKFLOW.md](WORKFLOW.md) for the full process.
 ---
 
 ### ngrok setup docs
-- **Owner:** Review - codex (implemented by gemini-cli, PR #6 open)
+- **Owner:** Pending - gemini-cli (after Mentions filter)
 - **Scope:** `README.md` — add ngrok installation, startup command, and `ACCESS_TOKEN` usage instructions
 - **Acceptance criteria:** A new user can follow README to get mobile access in < 5 min
 - **Test plan:** Walkthrough review
 - **Branch:** docs/ngrok-setup
+
+---
+
+### Chat Context Management (Snapshot & Reset)
+- **Owner:** Pending
+- **Scope:** Add automated task to snapshot `agentchattr_log.jsonl` to `archive/` every 500 messages; maintain a "State Summary" (TODO, branches, PRs); update `wrapper.py` to only inject last 50 messages + summary to agents.
+- **Acceptance criteria:** Prevent context window saturation; persistent state summary across resets
+- **Test plan:** Verify log rotation and summary injection
+- **Branch:** feature/context-management
 
 ---
 
