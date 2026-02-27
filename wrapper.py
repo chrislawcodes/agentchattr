@@ -93,6 +93,20 @@ def _ensure_codex_mcp(toml_file: Path, url: str):
 # Queue Watcher — polls for @mention triggers, calls platform inject function
 # ---------------------------------------------------------------------------
 
+class MonitorState:
+    def __init__(self):
+        self.last_inject_at = 0.0
+        self.lock = threading.Lock()
+
+    def record_inject(self):
+        with self.lock:
+            self.last_inject_at = time.time()
+
+    def get_last_inject(self):
+        with self.lock:
+            return self.last_inject_at
+
+
 def _notify_recovery(data_dir: Path, agent_name: str):
     """Write a flag file that the server picks up and broadcasts as a system message."""
     try:
@@ -111,9 +125,8 @@ def _trigger_cooldown_seconds(agent_name: str, agent_cfg: dict) -> float:
     return float(agent_cfg.get("trigger_cooldown", DEFAULT_TRIGGER_COOLDOWN_SECONDS))
 
 
-def _queue_watcher(queue_file: Path, agent_name: str, inject_fn, agent_cfg: dict):
+def _queue_watcher(queue_file: Path, agent_name: str, inject_fn, agent_cfg: dict, state: MonitorState):
     """Poll queue file; call inject_fn('chat - use mcp') when triggered."""
-    last_inject_at = 0.0
     cooldown = _trigger_cooldown_seconds(agent_name, agent_cfg)
 
     while True:
@@ -138,17 +151,35 @@ def _queue_watcher(queue_file: Path, agent_name: str, inject_fn, agent_cfg: dict
                     # Debounce wake-ups so slower TUIs (notably Gemini CLI)
                     # can finish MCP prompts before the next injected command.
                     now = time.time()
+                    last_inject_at = state.get_last_inject()
                     elapsed = now - last_inject_at
                     if elapsed < cooldown:
                         time.sleep(cooldown - elapsed)
                     # Small delay to let the TUI settle
                     time.sleep(0.5)
                     inject_fn("chat - use mcp")
-                    last_inject_at = time.time()
+                    state.record_inject()
         except Exception:
             pass  # Silently continue — monitor will restart if thread dies
 
         time.sleep(1)
+
+
+def _task_monitor(queue_file: Path, inject_fn, state: MonitorState, timeout_minutes: float):
+    """If queue is non-empty but no injection for >timeout, auto-reinject."""
+    timeout_seconds = timeout_minutes * 60
+    while True:
+        try:
+            time.sleep(30)  # Check every 30s
+            if queue_file.exists() and queue_file.stat().st_size > 0:
+                now = time.time()
+                last_inject = state.get_last_inject()
+                if now - last_inject > timeout_seconds:
+                    print(f"  [Monitor] Agent seems stuck (queue non-empty for >{timeout_minutes}m). Re-injecting...")
+                    inject_fn("chat - use mcp")
+                    state.record_inject()
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +203,8 @@ def main():
 
     agent = args.agent
     agent_cfg = config.get("agents", {}).get(agent, {})
+    server_cfg = config.get("server", {})
+    task_timeout = float(server_cfg.get("agent_task_timeout_minutes", 5.0))
 
     # Append resume_flag from config if not already manually provided
     resume_flag = agent_cfg.get("resume_flag")
@@ -186,6 +219,9 @@ def main():
     data_dir = ROOT / config.get("server", {}).get("data_dir", "./data")
     data_dir.mkdir(parents=True, exist_ok=True)
     queue_file = data_dir / f"{agent}_queue.jsonl"
+
+    # Monitor state shared between threads
+    state = MonitorState()
 
     # Flush stale queue entries from previous crashed sessions
     if queue_file.exists():
@@ -223,9 +259,14 @@ def main():
         nonlocal _watcher_inject_fn, _watcher_thread
         _watcher_inject_fn = inject_fn
         _watcher_thread = threading.Thread(
-            target=_queue_watcher, args=(queue_file, agent, inject_fn, agent_cfg), daemon=True
+            target=_queue_watcher, args=(queue_file, agent, inject_fn, agent_cfg, state), daemon=True
         )
         _watcher_thread.start()
+        
+        # Start task monitor thread
+        threading.Thread(
+            target=_task_monitor, args=(queue_file, inject_fn, state, task_timeout), daemon=True
+        ).start()
 
     # Monitor thread: checks watcher health and auto-restarts if dead
     def _watcher_monitor():
@@ -234,7 +275,7 @@ def main():
             time.sleep(5)
             if _watcher_thread and not _watcher_thread.is_alive() and _watcher_inject_fn:
                 _watcher_thread = threading.Thread(
-                    target=_queue_watcher, args=(queue_file, agent, _watcher_inject_fn, agent_cfg), daemon=True
+                    target=_queue_watcher, args=(queue_file, agent, _watcher_inject_fn, agent_cfg, state), daemon=True
                 )
                 _watcher_thread.start()
                 _notify_recovery(data_dir, agent)

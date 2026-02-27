@@ -80,10 +80,11 @@ def test_inject_uses_correct_session_name():
 
 def test_queue_watcher_ignores_malformed_json(tmp_path):
     """Malformed JSON lines in the queue file should be skipped silently."""
-    from wrapper import _queue_watcher
+    from wrapper import _queue_watcher, MonitorState
 
     queue_file = tmp_path / "test_queue.jsonl"
     inject_fn = MagicMock()
+    state = MonitorState()
 
     # Write one valid + one invalid line
     queue_file.write_text(
@@ -102,7 +103,7 @@ def test_queue_watcher_ignores_malformed_json(tmp_path):
 
     with patch("time.sleep", side_effect=fake_sleep):
         with pytest.raises(SystemExit):
-            _queue_watcher(queue_file, "claude", inject_fn, {})
+            _queue_watcher(queue_file, "claude", inject_fn, {}, state)
 
     # Valid line should still trigger an inject
     inject_fn.assert_called_once_with("chat - use mcp")
@@ -110,10 +111,11 @@ def test_queue_watcher_ignores_malformed_json(tmp_path):
 
 def test_queue_watcher_drains_queue_after_trigger(tmp_path):
     """Queue file should be cleared after processing triggers."""
-    from wrapper import _queue_watcher
+    from wrapper import _queue_watcher, MonitorState
 
     queue_file = tmp_path / "test_queue.jsonl"
     inject_fn = MagicMock()
+    state = MonitorState()
 
     queue_file.write_text('{"sender": "user", "text": "ping", "time": "00:00:00"}\n')
 
@@ -127,7 +129,7 @@ def test_queue_watcher_drains_queue_after_trigger(tmp_path):
 
     with patch("time.sleep", side_effect=fake_sleep):
         with pytest.raises(SystemExit):
-            _queue_watcher(queue_file, "claude", inject_fn, {})
+            _queue_watcher(queue_file, "claude", inject_fn, {}, state)
 
     assert queue_file.read_text() == "", "Queue file should be empty after processing"
 
