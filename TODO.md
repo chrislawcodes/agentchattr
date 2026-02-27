@@ -60,6 +60,24 @@ See [WORKFLOW.md](WORKFLOW.md) for the full process.
 
 ---
 
+### ngrok secret token auth
+- **Owner:** Pending - codex (after PR reviews)
+- **Scope:** `app.py` — read `ACCESS_TOKEN` env var; reject requests missing `?token=<value>` when set; no change to local-only usage
+- **Acceptance criteria:** Setting `ACCESS_TOKEN=xyz ngrok http 8300` and opening `https://xxx.ngrok.io?token=xyz` works; without token param returns 403
+- **Test plan:** Unit test middleware; manual test via ngrok URL
+- **Branch:** feature/ngrok-auth
+
+---
+
+### ngrok setup docs
+- **Owner:** Pending - gemini-cli (after Windows parity)
+- **Scope:** `README.md` — add ngrok installation, startup command, and `ACCESS_TOKEN` usage instructions
+- **Acceptance criteria:** A new user can follow README to get mobile access in < 5 min
+- **Test plan:** Walkthrough review
+- **Branch:** docs/ngrok-setup
+
+---
+
 ### `/status` command — agent health check
 - **Owner:** Pending
 - **Scope:** Add a `/status` slash command (or equivalent API endpoint) that reports each agent's online status, last-seen time, and queue depth
