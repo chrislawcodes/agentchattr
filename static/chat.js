@@ -18,6 +18,12 @@ let replyingTo = null;  // { id, sender, text } or null
 let unreadCount = 0;    // messages received while scrolled up
 let lastMessageDate = null;  // track date for dividers
 let soundEnabled = false;  // suppress sounds during initial history load
+let taskPollingTimer = null;
+let taskItems = [];
+let taskLoadError = '';
+let taskUpdatedAt = '';
+
+const TASK_COLUMNS = ['Pending', 'In Progress', 'Review', 'Done'];
 
 // --- Notification sounds ---
 const SOUND_OPTIONS = [
@@ -131,6 +137,7 @@ function init() {
     setupSettingsKeys();
     setupKeyboardShortcuts();
     startStatusPolling();
+    startTaskPolling();
 }
 
 let statusPollingTimer = null;
@@ -630,6 +637,95 @@ function clearChat() {
         ws.send(JSON.stringify({ type: 'message', text: '/clear', sender: username }));
     }
     document.getElementById('settings-bar').classList.add('hidden');
+}
+
+// --- Task board ---
+
+function startTaskPolling() {
+    fetchTasks();
+    if (taskPollingTimer) clearInterval(taskPollingTimer);
+    taskPollingTimer = setInterval(fetchTasks, 30000);
+}
+
+async function fetchTasks() {
+    try {
+        const resp = await fetch('/api/tasks', {
+            headers: { 'X-Session-Token': SESSION_TOKEN }
+        });
+        if (!resp.ok) throw new Error(`Task fetch failed (${resp.status})`);
+        const data = await resp.json();
+        taskItems = Array.isArray(data) ? data : [];
+        taskLoadError = '';
+        taskUpdatedAt = new Date().toLocaleTimeString([], {
+            hour: 'numeric',
+            minute: '2-digit',
+        });
+    } catch (err) {
+        console.error('Task board refresh failed:', err);
+        taskLoadError = 'Unable to load tasks.';
+    }
+
+    renderTaskBoard();
+}
+
+function toggleTaskPanel() {
+    const panel = document.getElementById('task-panel');
+    const mentionsPanel = document.getElementById('mentions-panel');
+    const pinsPanel = document.getElementById('pins-panel');
+
+    panel.classList.toggle('hidden');
+    if (!panel.classList.contains('hidden')) {
+        mentionsPanel.classList.add('hidden');
+        pinsPanel.classList.add('hidden');
+        renderTaskBoard();
+        fetchTasks();
+    }
+}
+
+function renderTaskBoard() {
+    const panel = document.getElementById('task-panel');
+    if (!panel || panel.classList.contains('hidden')) return;
+
+    const board = document.getElementById('task-board');
+    const updated = document.getElementById('task-panel-updated');
+    if (!board || !updated) return;
+
+    updated.textContent = taskUpdatedAt ? `Updated ${taskUpdatedAt}` : '';
+
+    if (taskLoadError) {
+        board.innerHTML = `<div class="task-empty">${escapeHtml(taskLoadError)}</div>`;
+        return;
+    }
+
+    const columns = TASK_COLUMNS.map((status) => {
+        const cards = taskItems.filter((task) => (task.status || '').toLowerCase() === status.toLowerCase());
+        const body = cards.length
+            ? cards.map(renderTaskCard).join('')
+            : '<div class="task-card task-card-empty">No tasks</div>';
+        return `
+            <section class="task-column">
+                <div class="task-column-title">
+                    <span>${escapeHtml(status)}</span>
+                    <span class="task-column-count">${cards.length}</span>
+                </div>
+                <div class="task-column-body">${body}</div>
+            </section>
+        `;
+    });
+
+    board.innerHTML = `<div class="task-columns">${columns.join('')}</div>`;
+}
+
+function renderTaskCard(task) {
+    const owner = task.owner ? `<div class="task-meta">@${escapeHtml(task.owner)}</div>` : '';
+    const branch = task.branch ? `<div class="task-meta">${escapeHtml(task.branch)}</div>` : '';
+    return `
+        <article class="task-card">
+            <div class="task-card-title">${escapeHtml(task.title || 'Untitled task')}</div>
+            ${owner}
+            ${branch}
+        </article>
+    `;
 }
 
 function saveSettings() {
@@ -1310,6 +1406,87 @@ function renderTodosPanel() {
     }
 }
 
+// --- Task Board (Kanban) ---
+
+let taskPollingTimer = null;
+
+function toggleTaskPanel() {
+    const panel = document.getElementById('task-panel');
+    const mentionsPanel = document.getElementById('mentions-panel');
+    const pinsPanel = document.getElementById('pins-panel');
+
+    panel.classList.toggle('hidden');
+    if (!panel.classList.contains('hidden')) {
+        mentionsPanel.classList.add('hidden');
+        pinsPanel.classList.add('hidden');
+        renderTaskBoard();
+        startTaskPolling();
+    } else {
+        stopTaskPolling();
+    }
+}
+
+function startTaskPolling() {
+    if (taskPollingTimer) clearInterval(taskPollingTimer);
+    taskPollingTimer = setInterval(renderTaskBoard, 30000); // 30s
+}
+
+function stopTaskPolling() {
+    if (taskPollingTimer) {
+        clearInterval(taskPollingTimer);
+        taskPollingTimer = null;
+    }
+}
+
+async function renderTaskBoard() {
+    try {
+        const resp = await fetch('/api/tasks', { headers: { 'X-Session-Token': SESSION_TOKEN } });
+        if (!resp.ok) return;
+        const tasks = await resp.json();
+        
+        const board = document.getElementById('task-board');
+        if (!board) return;
+        
+        const columns = {
+            'Pending': [],
+            'In Progress': [],
+            'Review': [],
+            'Done': []
+        };
+        
+        for (const task of tasks) {
+            let status = task.status;
+            if (!columns[status]) status = 'Pending';
+            columns[status].push(task);
+        }
+        
+        let html = '';
+        for (const [status, colTasks] of Object.entries(columns)) {
+            html += `<div class="task-column">
+                        <div class="task-column-header">${status} <span class="task-count">${colTasks.length}</span></div>`;
+            for (const t of colTasks) {
+                const ownerLabel = t.owner ? `<div class="task-owner">@${escapeHtml(t.owner)}</div>` : '';
+                const branchLabel = t.branch ? `<div class="task-branch">${escapeHtml(t.branch)}</div>` : '';
+                html += `<div class="task-card">
+                            <div class="task-title">${escapeHtml(t.title)}</div>
+                            <div class="task-meta">${ownerLabel}${branchLabel}</div>
+                         </div>`;
+            }
+            html += `</div>`;
+        }
+        
+        board.innerHTML = html;
+        
+        const updated = document.getElementById('task-panel-updated');
+        if (updated) {
+            const now = new Date();
+            updated.textContent = `Updated ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+        }
+    } catch (err) {
+        console.error("Failed to load tasks:", err);
+    }
+}
+
 // --- Mentions Panel (Inbox) ---
 
 function toggleMentionsPanel() {
@@ -1544,4 +1721,3 @@ function escapeHtml(text) {
 // --- Start ---
 
 document.addEventListener('DOMContentLoaded', init);
-

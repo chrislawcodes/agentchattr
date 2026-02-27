@@ -313,6 +313,7 @@ header h1 {
 
 /* --- Mentions panel --- */
 
+#task-panel,
 #mentions-panel {
     background: var(--bg-header);
     border-bottom: 1px solid var(--border);
@@ -321,14 +322,104 @@ header h1 {
     flex-shrink: 0;
 }
 
+#task-panel.hidden,
 #mentions-panel.hidden { display: none; }
 
+.task-panel-header,
 .mentions-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
     padding: 0 20px;
     border-bottom: 1px solid var(--border);
+}
+
+.task-panel-header {
+    padding: 12px 20px;
+    font-weight: 600;
+}
+
+.task-panel-updated {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-weight: normal;
+    margin-left: 12px;
+}
+
+#task-board {
+    display: flex;
+    gap: 16px;
+    padding: 20px;
+    overflow-x: auto;
+}
+
+.task-column {
+    flex: 1;
+    min-width: 250px;
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 8px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.task-column-header {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.task-count {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text);
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-size: 11px;
+}
+
+.task-card {
+    background: var(--bg-msg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    font-size: 13px;
+}
+
+.task-title {
+    font-weight: 600;
+    margin-bottom: 8px;
+    line-height: 1.4;
+}
+
+.task-meta {
+    display: flex;
+    gap: 8px;
+    font-size: 11px;
+    flex-wrap: wrap;
+}
+
+.task-owner {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.task-branch {
+    color: var(--text-dim);
+    font-family: inherit;
+}
+
+@media (max-width: 768px) {
+    #task-board {
+        flex-direction: column;
+    }
 }
 
 .mentions-tabs {
