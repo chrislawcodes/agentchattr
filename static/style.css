@@ -69,8 +69,18 @@ header {
 
 .header-left {
     display: flex;
-    align-items: baseline;
-    gap: 12px;
+    align-items: center;
+    gap: 10px;
+}
+
+.header-logo {
+    width: 24px;
+    height: 24px;
+    max-width: 24px;
+    max-height: 24px;
+    border-radius: 5px;
+    object-fit: contain;
+    flex-shrink: 0;
 }
 
 header h1 {
@@ -198,6 +208,50 @@ header h1 {
 
 .settings-field input:focus,
 .settings-field select:focus {
+    border-color: var(--accent);
+}
+
+/* --- Sound settings --- */
+
+.settings-divider {
+    width: 1px;
+    height: 24px;
+    background: var(--border);
+    flex-shrink: 0;
+}
+
+#sound-settings {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.sound-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.sound-label {
+    font-size: 12px;
+    color: var(--text-dim);
+    white-space: nowrap;
+    min-width: 50px;
+}
+
+.sound-select {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    padding: 3px 6px;
+    font-family: inherit;
+    font-size: 12px;
+    outline: none;
+    width: 120px;
+}
+
+.sound-select:focus {
     border-color: var(--accent);
 }
 

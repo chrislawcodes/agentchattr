@@ -5,11 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>agentchattr</title>
     <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon" href="/static/favicon.ico">
 </head>
 <body>
     <div id="app">
         <header>
             <div class="header-left">
+                <img src="/static/logo.png" alt="agentchattr" class="header-logo">
                 <h1 id="room-title">agentchattr</h1>
                 <span class="subtitle" id="room-subtitle"></span>
             </div>
@@ -49,6 +51,11 @@
             <div class="settings-field">
                 <label for="setting-hops">Loop guard</label>
                 <input type="number" id="setting-hops" min="1" max="50" value="4" title="Max agent-to-agent hops before pausing">
+            </div>
+            <div class="settings-divider"></div>
+            <div class="settings-field">
+                <label>Sounds</label>
+                <div id="sound-settings"></div>
             </div>
             <button class="settings-save" onclick="saveSettings()">Save</button>
             <span class="settings-spacer"></span>

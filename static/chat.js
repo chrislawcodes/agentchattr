@@ -15,6 +15,88 @@ let activeMentions = new Set();  // agent names with pre-@ toggled on
 let replyingTo = null;  // { id, sender, text } or null
 let unreadCount = 0;    // messages received while scrolled up
 let lastMessageDate = null;  // track date for dividers
+let soundEnabled = false;  // suppress sounds during initial history load
+
+// --- Notification sounds ---
+const SOUND_OPTIONS = [
+    { value: 'soft-chime', label: 'Soft Chime' },
+    { value: 'bright-ping', label: 'Bright Ping' },
+    { value: 'gentle-pop', label: 'Gentle Pop' },
+    { value: 'alert-tone', label: 'Alert Tone' },
+    { value: 'pluck', label: 'Pluck' },
+    { value: 'click', label: 'Click' },
+    { value: 'warm-bell', label: 'Warm Bell' },
+    { value: 'none', label: 'None' },
+];
+const DEFAULT_SOUND = 'soft-chime';
+let soundPrefs = JSON.parse(localStorage.getItem('agentchattr-sounds') || '{}');
+const soundCache = {};
+
+function playNotificationSound(sender) {
+    const key = sender.toLowerCase();
+    const soundName = soundPrefs[key] || soundPrefs['default'] || DEFAULT_SOUND;
+    if (soundName === 'none') return;
+    if (!soundCache[soundName]) {
+        soundCache[soundName] = new Audio(`/static/sounds/${soundName}.mp3`);
+    }
+    const audio = soundCache[soundName];
+    audio.currentTime = 0;
+    audio.play().catch(() => {});  // ignore autoplay policy errors
+}
+
+function buildSoundSettings() {
+    const container = document.getElementById('sound-settings');
+    if (!container) return;
+    container.innerHTML = '';
+
+    // Default sound
+    const agents = ['default', ...Object.keys(agentConfig)];
+    for (const name of agents) {
+        const row = document.createElement('div');
+        row.className = 'sound-row';
+        const label = document.createElement('span');
+        label.className = 'sound-label';
+        label.textContent = name === 'default' ? 'Default' : (agentConfig[name]?.label || name);
+        const select = document.createElement('select');
+        select.className = 'sound-select';
+        select.dataset.agent = name;
+        for (const opt of SOUND_OPTIONS) {
+            const o = document.createElement('option');
+            o.value = opt.value;
+            o.textContent = opt.label;
+            if ((soundPrefs[name] || (name === 'default' ? DEFAULT_SOUND : '')) === opt.value) {
+                o.selected = true;
+            }
+            select.appendChild(o);
+        }
+        // Add "Use default" option for non-default agents
+        if (name !== 'default') {
+            const o = document.createElement('option');
+            o.value = '';
+            o.textContent = 'Use default';
+            if (!soundPrefs[name]) o.selected = true;
+            select.insertBefore(o, select.firstChild);
+        }
+        // Preview on change
+        select.addEventListener('change', () => {
+            const val = select.value;
+            soundPrefs[name] = val;
+            localStorage.setItem('agentchattr-sounds', JSON.stringify(soundPrefs));
+            if (val && val !== 'none') {
+                if (!soundCache[val]) soundCache[val] = new Audio(`/static/sounds/${val}.mp3`);
+                soundCache[val].currentTime = 0;
+                soundCache[val].play().catch(() => {});
+            }
+        });
+        row.appendChild(label);
+        row.appendChild(select);
+        container.appendChild(row);
+    }
+}
+
+function saveSoundPrefs() {
+    localStorage.setItem('agentchattr-sounds', JSON.stringify(soundPrefs));
+}
 
 // Real brand logo SVGs from Bootstrap Icons (MIT licensed)
 const BRAND_AVATARS = {
@@ -141,6 +223,10 @@ function connectWebSocket() {
     ws.onmessage = (e) => {
         const event = JSON.parse(e.data);
         if (event.type === 'message') {
+            // Play notification sound for new messages from others (not joins, not when focused)
+            if (soundEnabled && !document.hasFocus() && event.data.type !== 'join' && event.data.sender && event.data.sender.toLowerCase() !== username.toLowerCase()) {
+                playNotificationSound(event.data.sender);
+            }
             appendMessage(event.data);
         } else if (event.type === 'agents') {
             applyAgentConfig(event.data);
@@ -159,6 +245,8 @@ function connectWebSocket() {
             updateTodoState(d.id, d.status);
         } else if (event.type === 'status') {
             updateStatus(event.data);
+            // Status is the last event sent on connect — enable sounds after history
+            if (!soundEnabled) soundEnabled = true;
         } else if (event.type === 'typing') {
             updateTyping(event.agent, event.active);
         } else if (event.type === 'settings') {
@@ -171,6 +259,7 @@ function connectWebSocket() {
 
     ws.onclose = () => {
         console.log('Disconnected, reconnecting in 2s...');
+        soundEnabled = false;  // suppress sounds during reconnect history replay
         reconnectTimer = setTimeout(connectWebSocket, 2000);
     };
 
@@ -363,6 +452,7 @@ function applyAgentConfig(data) {
     }
     buildStatusPills();
     buildMentionToggles();
+    buildSoundSettings();
     // Re-color any messages already rendered (e.g. from a reconnect)
     recolorMessages();
 }

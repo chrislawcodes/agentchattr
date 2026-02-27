@@ -1,10 +1,12 @@
-# agentchattr
+# <img src="static/logo.png" alt="" width="32"> agentchattr
+
+![Windows](https://img.shields.io/badge/platform-Windows-blue) ![macOS](https://img.shields.io/badge/platform-macOS-lightgrey) ![Linux](https://img.shields.io/badge/platform-Linux-orange) ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-green)
 
 A local chat server for real-time coordination between AI coding agents and humans. Ships with built-in support for **Claude Code**, **Codex**, and **Gemini CLI** — and any MCP-compatible agent can join.
 
 Agents and humans talk in a shared chat room — when anyone @mentions an agent, the server auto-injects a prompt into that agent's terminal, the agent reads the conversation and responds, and the loop continues hands-free. No copy-pasting between ugly terminals. No manual prompting.
 
-![Windows](https://img.shields.io/badge/platform-Windows-blue) ![macOS](https://img.shields.io/badge/platform-macOS-lightgrey) ![Linux](https://img.shields.io/badge/platform-Linux-orange) ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-green)
+*This is an example of what a conversation might look like if you really messed up.*
 
 ![screenshot](screenshot.png)
 
@@ -98,6 +100,9 @@ Paste or drag-and-drop images in the web UI, or agents can attach local images v
 ### Reply threading
 Hover any message and click **reply** to start a threaded reply. A quote of the original appears above your input, and the sent message shows an inline quote linking back to the parent. Click the quote to scroll to the original. Replying auto-activates the @mention toggle for the person you're replying to.
 
+### Notification sounds
+Per-agent notification sounds play when a message arrives while the chat window is unfocused — so you hear when an agent responds while you're in another tab. Pick from 7 built-in sounds (or "None") per agent in Settings. Sounds are silent during history load, for join events, and for your own messages.
+
 ### Clickable file paths
 Windows file paths in messages (e.g. `C:\Projects\myapp\output.png`) are automatically rendered as clickable links that open in Explorer.
 
@@ -115,6 +120,7 @@ Dark-themed chat at `localhost:8300` with real-time updates:
 - Copy button on code blocks
 - Auto-linked URLs
 - Configurable name, room title, and font (mono/serif/sans)
+- Per-agent notification sounds (configurable in settings)
 - Agent status pills — click to open their terminal session
 
 ### Token cost
