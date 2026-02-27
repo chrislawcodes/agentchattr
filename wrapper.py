@@ -92,6 +92,15 @@ def _ensure_codex_mcp(toml_file: Path, url: str):
 # Queue Watcher — polls for @mention triggers, calls platform inject function
 # ---------------------------------------------------------------------------
 
+def _notify_recovery(data_dir: Path, agent_name: str):
+    """Write a flag file that the server picks up and broadcasts as a system message."""
+    try:
+        flag = data_dir / f"{agent_name}_recovered"
+        flag.write_text(agent_name, "utf-8")
+    except Exception:
+        pass
+
+
 def _queue_watcher(queue_file: Path, agent_name: str, inject_fn):
     """Poll queue file; call inject_fn('chat - use mcp') when triggered."""
     while True:
@@ -117,7 +126,7 @@ def _queue_watcher(queue_file: Path, agent_name: str, inject_fn):
                     time.sleep(0.5)
                     inject_fn("chat - use mcp")
         except Exception:
-            pass  # Don't pollute the agent's TUI
+            pass  # Silently continue — monitor will restart if thread dies
 
         time.sleep(1)
 
@@ -170,11 +179,32 @@ def main():
     print(f"  Starting {command} in {cwd}...\n")
 
     # Helper: start the queue watcher with a given inject function
+    # Returns the thread so the monitor can check is_alive()
+    _watcher_inject_fn = None
+    _watcher_thread = None
+
     def start_watcher(inject_fn):
-        watcher = threading.Thread(
+        nonlocal _watcher_inject_fn, _watcher_thread
+        _watcher_inject_fn = inject_fn
+        _watcher_thread = threading.Thread(
             target=_queue_watcher, args=(queue_file, agent, inject_fn), daemon=True
         )
-        watcher.start()
+        _watcher_thread.start()
+
+    # Monitor thread: checks watcher health and auto-restarts if dead
+    def _watcher_monitor():
+        nonlocal _watcher_thread
+        while True:
+            time.sleep(5)
+            if _watcher_thread and not _watcher_thread.is_alive() and _watcher_inject_fn:
+                _watcher_thread = threading.Thread(
+                    target=_queue_watcher, args=(queue_file, agent, _watcher_inject_fn), daemon=True
+                )
+                _watcher_thread.start()
+                _notify_recovery(data_dir, agent)
+
+    monitor = threading.Thread(target=_watcher_monitor, daemon=True)
+    monitor.start()
 
     # Dispatch to platform-specific runner
     if sys.platform == "win32":

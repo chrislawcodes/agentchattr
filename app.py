@@ -3,6 +3,7 @@
 import asyncio
 import json
 import sys
+import threading
 import uuid
 import logging
 from pathlib import Path
@@ -147,6 +148,27 @@ def configure(cfg: dict, session_token: str = ""):
     # Apply saved loop guard setting
     if "max_agent_hops" in room_settings:
         router.max_hops = room_settings["max_agent_hops"]
+
+    # Background thread: check for wrapper recovery flag files
+    _data_dir = Path(data_dir)
+
+    def _check_recovery_flags():
+        import time as _time
+        while True:
+            _time.sleep(3)
+            try:
+                for flag in _data_dir.glob("*_recovered"):
+                    agent_name = flag.read_text("utf-8").strip()
+                    flag.unlink()
+                    store.add(
+                        "system",
+                        f"Agent routing for {agent_name} interrupted — auto-recovered. "
+                        "If agents aren't responding, try sending your message again."
+                    )
+            except Exception:
+                pass
+
+    threading.Thread(target=_check_recovery_flags, daemon=True).start()
 
 
 # --- Store → WebSocket bridge ---
@@ -468,6 +490,7 @@ async def get_messages(since_id: int = 0, limit: int = 50):
     if since_id:
         return store.get_since(since_id)
     return store.get_recent(limit)
+
 
 
 @app.get("/api/status")
