@@ -179,26 +179,57 @@ def test_run_agent_constructs_resume_command():
 def test_wrapper_main_flushes_queue_file_on_startup(tmp_path):
     """Ensure leftover trigger files from previous runs are deleted when wrapper starts."""
     from wrapper import main
-    
+
     # Setup dummy data dir and queue file
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     queue_file = data_dir / "claude_queue.jsonl"
     queue_file.write_text("stale_data\n")
-    
+
     # Write a dummy config.toml
     config_file = tmp_path / "config.toml"
     config_file.write_text('[agents.claude]\ncommand = "claude"\n[server]\ndata_dir = "data"\n')
-    
+
     with patch("wrapper.ROOT", tmp_path), \
          patch("sys.argv", ["wrapper.py", "claude"]), \
          patch("shutil.which", return_value="/bin/claude"), \
          patch("wrapper.threading.Thread"), \
          patch("sys.platform", "linux"), \
          patch("wrapper_unix.run_agent"):
-         
+
         main()
-        
+
     # Check if queue file was cleared
     assert queue_file.read_text() == "", "Queue file should be flushed on wrapper startup"
+
+
+# ---------------------------------------------------------------------------
+# Windows inject — Escape-before-inject parity
+# ---------------------------------------------------------------------------
+
+def test_inject_windows_sends_escape_before_text():
+    """Verify windows inject path also sends Escape first."""
+    # We must patch sys.platform and WinDLL before importing wrapper_windows
+    with patch("sys.platform", "win32"), \
+         patch("ctypes.WinDLL", create=True), \
+         patch("ctypes.byref"):
+
+        # In case it was already imported/failed
+        if "wrapper_windows" in sys.modules:
+            del sys.modules["wrapper_windows"]
+
+        import wrapper_windows
+
+        with patch("wrapper_windows._write_key") as mock_write:
+            wrapper_windows.inject("test")
+
+            calls = mock_write.call_args_list
+            # First two calls to _write_key are for Escape (down/up)
+            assert calls[0][0][1] == "\x1b"
+            assert calls[0][0][2] is True  # key_down
+            assert calls[1][0][1] == "\x1b"
+            assert calls[1][0][2] is False  # key_up
+
+            # Check that "test" follows
+            assert calls[2][0][1] == "t"
 
