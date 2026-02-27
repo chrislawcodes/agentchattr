@@ -9,6 +9,10 @@ if [ ! -d ".venv" ]; then
 fi
 source .venv/bin/activate
 
+# Force Claude CLI auth mode (do not use API key env vars)
+unset ANTHROPIC_API_KEY
+unset CLAUDE_API_KEY
+
 # Start server in a separate terminal if not already running
 if ! lsof -i :8300 -sTCP:LISTEN >/dev/null 2>&1 && \
    ! ss -tlnp 2>/dev/null | grep -q ':8300 '; then

@@ -52,7 +52,7 @@ def inject(text: str, *, tmux_session: str):
     )
 
 
-def run_agent(command, extra_args, cwd, env, queue_file, agent, no_restart, start_watcher):
+def run_agent(command, extra_args, cwd, env, queue_file, agent, no_restart, start_watcher, strip_env=None):
     """Run agent inside a tmux session, inject via tmux send-keys."""
     _check_tmux()
 
@@ -60,6 +60,13 @@ def run_agent(command, extra_args, cwd, env, queue_file, agent, no_restart, star
     agent_cmd = " ".join(
         [shlex.quote(command)] + [shlex.quote(a) for a in extra_args]
     )
+
+    # Prefix command with `env -u VAR ...` so env vars are unset inside the
+    # tmux session. subprocess.run(env=...) only affects the tmux client
+    # binary — the session shell inherits from the tmux server instead.
+    if strip_env:
+        unset_args = " ".join(f"-u {shlex.quote(v)}" for v in strip_env)
+        agent_cmd = f"env {unset_args} {agent_cmd}"
 
     # Resolve cwd to absolute path (tmux -c needs it)
     from pathlib import Path

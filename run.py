@@ -1,7 +1,9 @@
 """Entry point — starts MCP server (port 8200) + web UI (port 8300)."""
 
 import asyncio
+import hashlib
 import secrets
+import subprocess
 import sys
 import threading
 import time
@@ -12,6 +14,25 @@ from pathlib import Path
 # Ensure the project directory is on the import path
 ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT))
+
+
+def _stable_session_token() -> str:
+    """Derive a stable session token from Claude Code's API key (macOS keychain).
+
+    Hashes the key with SHA-256 so the raw API key is never stored or transmitted.
+    Falls back to a fresh random token if the key can't be read.
+    """
+    try:
+        result = subprocess.run(
+            ["security", "find-generic-password", "-s", "Claude Code", "-w"],
+            capture_output=True, text=True, timeout=5,
+        )
+        api_key = result.stdout.strip()
+        if api_key:
+            return hashlib.sha256(api_key.encode()).hexdigest()
+    except Exception:
+        pass
+    return secrets.token_hex(32)
 
 
 def main():
@@ -29,8 +50,8 @@ def main():
     with open(config_path, "rb") as f:
         config = tomllib.load(f)
 
-    # --- Security: generate a random session token (in-memory only) ---
-    session_token = secrets.token_hex(32)
+    # --- Security: derive a stable session token from Claude Code's API key ---
+    session_token = _stable_session_token()
 
     # Configure the FastAPI app (creates shared store)
     from app import app, configure, set_event_loop

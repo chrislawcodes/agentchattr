@@ -400,6 +400,28 @@ async def websocket_endpoint(websocket: WebSocket):
                     store.add(sender, f"{mentions} {prompts[form]}")
                     continue
 
+                # /history command
+                if text.lower().startswith("/history"):
+                    parts = text.split()
+                    try:
+                        count = int(parts[1]) if len(parts) > 1 else 20
+                    except (ValueError, IndexError):
+                        count = 20
+                    
+                    # Limit count to avoid massive messages
+                    count = max(1, min(count, 100))
+                    
+                    recent = store.get_recent(count)
+                    lines = [f"**Recent History (last {len(recent)} messages):**"]
+                    for m in recent:
+                        sender_name = m.get("sender", "unknown")
+                        msg_text = m.get("text", "")
+                        msg_time = m.get("time", "")
+                        lines.append(f"[{msg_time}] **{sender_name}**: {msg_text}")
+                    
+                    store.add("system", "\n".join(lines))
+                    continue
+
                 # Store message — the on_message callback handles broadcast + triggers
                 reply_to = event.get("reply_to")
                 if reply_to is not None:

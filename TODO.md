@@ -106,7 +106,7 @@ See [WORKFLOW.md](WORKFLOW.md) for the full process.
 ---
 
 ### `/history` command — cross-session message history
-- **Owner:** In Progress - gemini-cli
+- **Owner:** Review - codex (implemented by gemini-cli)
 - **Scope:** Add a `/history [n]` command that returns the last N messages from the persistent store, including messages from previous sessions
 - **Acceptance criteria:** `/history 20` returns the 20 most recent messages regardless of when the server started
 - **Test plan:** Unit test store retrieval; manual test across a server restart
