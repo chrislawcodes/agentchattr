@@ -39,7 +39,7 @@ room_settings: dict = {
     "title": "agentchattr",
     "username": "user",
     "font": "mono",
-    "max_agent_hops": 4,
+    "max_agent_hops": 10,
 }
 
 
