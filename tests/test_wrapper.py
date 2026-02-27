@@ -1,17 +1,15 @@
 """Tests for wrapper.py — cooldown selection and queue watcher logic."""
 
-import json
 import sys
-import time
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from wrapper import DEFAULT_TRIGGER_COOLDOWN_SECONDS, _trigger_cooldown_seconds
+from wrapper import DEFAULT_TRIGGER_COOLDOWN_SECONDS, _trigger_cooldown_seconds  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -128,3 +126,47 @@ def test_queue_watcher_drains_queue_after_trigger(tmp_path):
             _queue_watcher(queue_file, "claude", inject_fn, {})
 
     assert queue_file.read_text() == "", "Queue file should be empty after processing"
+
+
+# ---------------------------------------------------------------------------
+# run_agent command construction
+# ---------------------------------------------------------------------------
+
+def test_run_agent_constructs_resume_command():
+    """Verify that extra_args are properly formatted into the agent_cmd."""
+    with patch("subprocess.run") as mock_run:
+        from wrapper_unix import run_agent
+        
+        def fake_start_watcher(inject_fn):
+            pass
+
+        # mock_run side effects for the loop: kill-session, new-session, attach-session
+        mock_run.side_effect = [
+            MagicMock(returncode=0), # tmux kill-session
+            MagicMock(returncode=0), # tmux new-session
+            KeyboardInterrupt(),     # tmux attach-session (simulating user Ctrl+C)
+            MagicMock(returncode=0), # tmux kill-session (in except block)
+        ]
+        
+        run_agent(
+            command="gemini",
+            extra_args=["--approval-mode", "yolo", "--resume"],
+            cwd=".",
+            env={},
+            queue_file="dummy.jsonl",
+            agent="gemini",
+            no_restart=True,
+            start_watcher=fake_start_watcher
+        )
+
+    # Find the new-session call
+    new_session_call = next(c for c in mock_run.call_args_list if "new-session" in c[0][0])
+    cmd_args = new_session_call[0][0]
+    
+    # The agent_cmd is the last argument passed to tmux new-session -c <cwd> <cmd>
+    agent_cmd = cmd_args[-1]
+    
+    assert "gemini" in agent_cmd
+    assert "--resume" in agent_cmd
+    assert "--approval-mode yolo" in agent_cmd
+

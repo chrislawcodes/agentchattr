@@ -172,6 +172,15 @@ def main():
 
     agent = args.agent
     agent_cfg = config.get("agents", {}).get(agent, {})
+
+    # Append resume_flag from config if not already manually provided
+    resume_flag = agent_cfg.get("resume_flag")
+    if resume_flag:
+        import shlex
+        resume_args = shlex.split(resume_flag)
+        if not any(arg in extra for arg in resume_args):
+            extra.extend(resume_args)
+
     cwd = agent_cfg.get("cwd", ".")
     command = agent_cfg.get("command", agent)
     data_dir = ROOT / config.get("server", {}).get("data_dir", "./data")

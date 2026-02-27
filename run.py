@@ -33,7 +33,7 @@ def main():
     session_token = secrets.token_hex(32)
 
     # Configure the FastAPI app (creates shared store)
-    from app import app, configure, set_event_loop, store as _store_ref
+    from app import app, configure, set_event_loop
     configure(config, session_token=session_token)
 
     # Share the store with the MCP bridge
@@ -93,11 +93,11 @@ def main():
         else:
             print(f"\n  WARNING: Binding to {host} — network access enabled via --allow-network")
 
-    print(f"\n  agentchattr")
+    print("\n  agentchattr")
     print(f"  Web UI:  http://{host}:{port}")
     print(f"  MCP HTTP: http://{host}:{http_port}/mcp  (Claude, Codex)")
     print(f"  MCP SSE:  http://{host}:{sse_port}/sse   (Gemini)")
-    print(f"  Agents auto-trigger on @mention")
+    print("  Agents auto-trigger on @mention")
     print(f"\n  Session token: {session_token}\n")
 
     uvicorn.run(app, host=host, port=port, log_level="info")

@@ -83,7 +83,7 @@ def run_agent(command, extra_args, cwd, env, queue_file, agent, no_restart, star
                 break
 
             print(f"\n  {agent.capitalize()} exited (code {proc.returncode}).")
-            print(f"  Restarting in 3s... (Ctrl+C to quit)")
+            print("  Restarting in 3s... (Ctrl+C to quit)")
             time.sleep(3)
         except KeyboardInterrupt:
             break
