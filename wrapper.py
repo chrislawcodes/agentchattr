@@ -111,20 +111,23 @@ def _queue_watcher(queue_file: Path, agent_name: str, inject_fn):
                 queue_file.write_text("")
 
                 has_trigger = False
+                channel = "general"
                 for line in lines:
                     line = line.strip()
                     if not line:
                         continue
                     try:
-                        json.loads(line)
+                        data = json.loads(line)
                         has_trigger = True
+                        if isinstance(data, dict) and "channel" in data:
+                            channel = data["channel"]
                     except json.JSONDecodeError:
                         pass
 
                 if has_trigger:
                     # Small delay to let the TUI settle
                     time.sleep(0.5)
-                    inject_fn("chat - use mcp")
+                    inject_fn(f"mcp read #{channel}")
         except Exception:
             pass  # Silently continue — monitor will restart if thread dies
 
@@ -177,6 +180,22 @@ def main():
     print(f"  === {agent.capitalize()} Chat Wrapper ===")
     print(f"  @{agent} mentions auto-inject 'chat - use mcp'")
     print(f"  Starting {command} in {cwd}...\n")
+
+    # Heartbeat — ping the server every 60s to keep presence alive
+    server_port = config.get("server", {}).get("port", 8300)
+
+    def _heartbeat():
+        import urllib.request
+        url = f"http://127.0.0.1:{server_port}/api/heartbeat/{agent}"
+        while True:
+            try:
+                req = urllib.request.Request(url, method="POST", data=b"")
+                urllib.request.urlopen(req, timeout=5)
+            except Exception:
+                pass
+            time.sleep(60)
+
+    threading.Thread(target=_heartbeat, daemon=True).start()
 
     # Helper: start the queue watcher with a given inject function
     # Returns the thread so the monitor can check is_alive()

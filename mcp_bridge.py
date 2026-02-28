@@ -17,11 +17,12 @@ log = logging.getLogger(__name__)
 # Shared state — set by run.py before starting
 store = None
 decisions = None
+room_settings = None  # set by run.py — dict with "channels" list etc.
 _presence: dict[str, float] = {}
 _presence_lock = threading.Lock()
-_cursors: dict[str, int] = {}  # agent_name → last seen message id
+_cursors: dict[str, dict[str, int]] = {}  # agent_name → {channel_name → last_id}
 _cursors_lock = threading.Lock()
-PRESENCE_TIMEOUT = 300
+PRESENCE_TIMEOUT = 120  # 2 missed heartbeats (60s interval) = offline
 
 _MCP_INSTRUCTIONS = (
     "agentchattr — a shared chat channel for coordinating development between AI agents and humans. "
@@ -34,16 +35,25 @@ _MCP_INSTRUCTIONS = (
     "to read existing approved decisions — treat approved decisions as authoritative guidance. "
     "When you make a significant choice that other agents should follow (e.g. a library pick, naming "
     "convention, or architecture pattern), propose it as a decision so the human can approve it. "
-    "Keep decisions short and actionable (max 80 chars). Don't propose trivial or session-specific things."
+    "Keep decisions short and actionable (max 80 chars). Don't propose trivial or session-specific things.\n\n"
+    "Messages belong to channels (default: 'general'). Use the 'channel' parameter in chat_send and "
+    "chat_read to target a specific channel. Omit channel or pass empty string to read from all channels.\n\n"
+    "If you are addressed in chat, respond in chat — use chat_send to reply in the same channel. "
+    "Do not take the answer back to your terminal session. "
+    "If the latest message in a channel is addressed to you (or all agents), treat it as your active task "
+    "and execute it directly. Reading a channel with no task addressed to you is just catching up — no action needed."
 )
 
 # --- Tool implementations (shared between both servers) ---
 
 
-def chat_send(sender: str, message: str, image_path: str = "", reply_to: int = -1) -> str:
+def chat_send(sender: str, message: str, image_path: str = "", reply_to: int = -1, channel: str = "general") -> str:
     """Send a message to the agentchattr chat. Use your name as sender (claude/codex/ben).
     Optionally attach a local image by providing image_path (absolute path).
-    Optionally reply to a message by providing reply_to (message ID)."""
+    Optionally reply to a message by providing reply_to (message ID).
+    Optionally specify a channel (default: 'general')."""
+    if sender:
+        _touch_presence(sender)
     if not message.strip() and not image_path:
         return "Empty message, not sent."
 
@@ -67,7 +77,7 @@ def chat_send(sender: str, message: str, image_path: str = "", reply_to: int = -
     if reply_id is not None and store.get_by_id(reply_id) is None:
         return f"Message #{reply_to} not found."
 
-    msg = store.add(sender, message.strip(), attachments=attachments, reply_to=reply_id)
+    msg = store.add(sender, message.strip(), attachments=attachments, reply_to=reply_id, channel=channel)
     with _presence_lock:
         _presence[sender] = time.time()
     return f"Sent (id={msg['id']})"
@@ -83,6 +93,7 @@ def _serialize_messages(msgs: list[dict]) -> str:
             "text": m["text"],
             "type": m["type"],
             "time": m["time"],
+            "channel": m.get("channel", "general"),
         }
         if m.get("attachments"):
             entry["attachments"] = m["attachments"]
@@ -92,55 +103,83 @@ def _serialize_messages(msgs: list[dict]) -> str:
     return json.dumps(out, indent=2, ensure_ascii=False) if out else "No new messages."
 
 
-def _update_cursor(sender: str, msgs: list[dict]):
+def migrate_cursors_rename(old_name: str, new_name: str):
+    """Move cursor entries from old channel name to new channel name."""
+    with _cursors_lock:
+        for agent_cursors in _cursors.values():
+            if old_name in agent_cursors:
+                agent_cursors[new_name] = agent_cursors.pop(old_name)
+
+
+def migrate_cursors_delete(channel: str):
+    """Remove cursor entries for a deleted channel."""
+    with _cursors_lock:
+        for agent_cursors in _cursors.values():
+            agent_cursors.pop(channel, None)
+
+
+def _update_cursor(sender: str, msgs: list[dict], channel: str | None):
     if sender and msgs:
+        ch_key = channel if channel else "__all__"
         with _cursors_lock:
-            _cursors[sender] = msgs[-1]["id"]
+            agent_cursors = _cursors.setdefault(sender, {})
+            agent_cursors[ch_key] = msgs[-1]["id"]
 
 
-def chat_read(sender: str = "", since_id: int = 0, limit: int = 20) -> str:
-    """Read chat messages. Returns JSON array with: id, sender, text, type, time.
+def chat_read(sender: str = "", since_id: int = 0, limit: int = 20, channel: str = "") -> str:
+    """Read chat messages. Returns JSON array with: id, sender, text, type, time, channel.
 
     Smart defaults:
     - First call with sender: returns last `limit` messages (full context).
     - Subsequent calls with same sender: returns only NEW messages since last read.
     - Pass since_id to override and read from a specific point.
-    - Omit sender to always get the last `limit` messages (no cursor)."""
+    - Omit sender to always get the last `limit` messages (no cursor).
+    - Pass channel to filter by channel name (default: all channels)."""
+    if sender:
+        _touch_presence(sender)
+    ch = channel if channel else None
     if since_id:
-        msgs = store.get_since(since_id)
+        msgs = store.get_since(since_id, channel=ch)
     elif sender:
+        ch_key = ch if ch else "__all__"
         with _cursors_lock:
-            cursor = _cursors.get(sender, 0)
+            agent_cursors = _cursors.get(sender, {})
+            cursor = agent_cursors.get(ch_key, 0)
         if cursor:
-            msgs = store.get_since(cursor)
+            msgs = store.get_since(cursor, channel=ch)
         else:
-            msgs = store.get_recent(limit)
+            msgs = store.get_recent(limit, channel=ch)
     else:
-        msgs = store.get_recent(limit)
+        msgs = store.get_recent(limit, channel=ch)
 
     msgs = msgs[-limit:]
-    _update_cursor(sender, msgs)
+    _update_cursor(sender, msgs, ch)
     return _serialize_messages(msgs)
 
 
-def chat_resync(sender: str, limit: int = 50) -> str:
+def chat_resync(sender: str, limit: int = 50, channel: str = "") -> str:
     """Explicit full-context fetch.
 
     Returns the latest `limit` messages and resets the sender cursor
     to the latest returned message id.
+    Pass channel to filter by channel name (default: all channels).
     """
     if not sender.strip():
         return "Error: sender is required for chat_resync."
-    msgs = store.get_recent(limit)
-    _update_cursor(sender, msgs)
+    _touch_presence(sender)
+    ch = channel if channel else None
+    msgs = store.get_recent(limit, channel=ch)
+    _update_cursor(sender, msgs, ch)
     return _serialize_messages(msgs)
 
 
-def chat_join(name: str) -> str:
+def chat_join(name: str, channel: str = "general") -> str:
     """Announce that you've connected to agentchattr."""
-    with _presence_lock:
-        _presence[name] = time.time()
-    store.add(name, f"{name} connected", msg_type="join")
+    _touch_presence(name)
+    # Post join in all channels so every agent sees it
+    channels = room_settings.get("channels", ["general"]) if room_settings else ["general"]
+    for ch in channels:
+        store.add(name, f"{name} connected", msg_type="join", channel=ch)
     online = _get_online()
     return f"Joined. Online: {', '.join(online)}"
 
@@ -149,6 +188,12 @@ def chat_who() -> str:
     """Check who's currently online in agentchattr."""
     online = _get_online()
     return f"Online: {', '.join(online)}" if online else "Nobody online."
+
+
+def _touch_presence(name: str):
+    """Update presence timestamp — called on any MCP tool use."""
+    with _presence_lock:
+        _presence[name] = time.time()
 
 
 def _get_online() -> list[str]:
@@ -172,6 +217,8 @@ def chat_decision(action: str, sender: str, decision: str = "", reason: str = ""
       - propose: Propose a new decision for human approval. Requires decision text + sender.
 
     Agents cannot approve, edit, or delete decisions — only humans can do that from the web UI."""
+    if sender:
+        _touch_presence(sender)
     action = action.strip().lower()
 
     if action == "list":
@@ -198,8 +245,14 @@ def chat_decision(action: str, sender: str, decision: str = "", reason: str = ""
 
 # --- Server instances ---
 
+def chat_channels() -> str:
+    """List all available channels. Returns a JSON array of channel names."""
+    channels = room_settings.get("channels", ["general"]) if room_settings else ["general"]
+    return json.dumps(channels)
+
+
 _ALL_TOOLS = [
-    chat_send, chat_read, chat_resync, chat_join, chat_who, chat_decision,
+    chat_send, chat_read, chat_resync, chat_join, chat_who, chat_decision, chat_channels,
 ]
 
 

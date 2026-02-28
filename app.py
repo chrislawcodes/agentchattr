@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re as _re
 import sys
 import threading
 import uuid
@@ -39,7 +40,13 @@ room_settings: dict = {
     "username": "user",
     "font": "mono",
     "max_agent_hops": 4,
+    "channels": ["general"],
+    "history_limit": "all",
 }
+
+# Channel validation
+_CHANNEL_NAME_RE = _re.compile(r'^[a-z0-9][a-z0-9\-]{0,19}$')
+MAX_CHANNELS = 8
 
 
 def _settings_path() -> Path:
@@ -56,6 +63,11 @@ def _load_settings():
             room_settings.update(saved)
         except Exception:
             pass
+    # Ensure "general" always exists and is first
+    if "channels" not in room_settings or not room_settings["channels"]:
+        room_settings["channels"] = ["general"]
+    elif "general" not in room_settings["channels"]:
+        room_settings["channels"].insert(0, "general")
 
 
 def _save_settings():
@@ -86,7 +98,7 @@ def _install_security_middleware(token: str, cfg: dict):
             # Static assets, index page, and uploaded images are public.
             # The index page injects the token client-side via same-origin script.
             # Uploads use random filenames and have path-traversal protection.
-            if path == "/" or path.startswith(("/static/", "/uploads/")):
+            if path == "/" or path.startswith(("/static/", "/uploads/", "/api/heartbeat/")):
                 return await call_next(request)
 
             # --- Origin check (blocks cross-origin / DNS-rebinding attacks) ---
@@ -156,10 +168,14 @@ def configure(cfg: dict, session_token: str = ""):
     # Background thread: check for wrapper recovery flag files
     _data_dir = Path(data_dir)
 
-    def _check_recovery_flags():
+    _known_online: set[str] = set()  # agents we've seen join — track for leave messages
+
+    def _background_checks():
         import time as _time
+        import mcp_bridge
         while True:
             _time.sleep(3)
+            # Recovery flags
             try:
                 for flag in _data_dir.glob("*_recovered"):
                     agent_name = flag.read_text("utf-8").strip()
@@ -172,7 +188,30 @@ def configure(cfg: dict, session_token: str = ""):
             except Exception:
                 pass
 
-    threading.Thread(target=_check_recovery_flags, daemon=True).start()
+            # Presence expiry — post leave messages for agents that went offline
+            try:
+                now = _time.time()
+                with mcp_bridge._presence_lock:
+                    currently_online = {
+                        name for name, ts in mcp_bridge._presence.items()
+                        if now - ts < mcp_bridge.PRESENCE_TIMEOUT
+                    }
+                # Detect agents that were online but are no longer
+                went_offline = _known_online - currently_online
+                came_online = currently_online - _known_online
+                for name in went_offline:
+                    # Post leave in all channels so every agent sees it
+                    channels = room_settings.get("channels", ["general"])
+                    for ch in channels:
+                        store.add(name, f"{name} disconnected", msg_type="leave", channel=ch)
+                    if _event_loop:
+                        asyncio.run_coroutine_threadsafe(broadcast_status(), _event_loop)
+                _known_online.clear()
+                _known_online.update(currently_online)
+            except Exception:
+                pass
+
+    threading.Thread(target=_background_checks, daemon=True).start()
 
 
 # --- Store → WebSocket bridge ---
@@ -222,21 +261,22 @@ async def _handle_new_message(msg: dict):
     # System messages never trigger routing — prevents infinite callback loops
     sender = msg.get("sender", "")
     text = msg.get("text", "")
+    channel = msg.get("channel", "general")
     if sender == "system":
         return
 
     # Check for slash commands (e.g. from MCP agents)
     low_text = text.lower()
     if low_text == "/continue":
-        router.continue_routing()
-        store.add("system", f"Routing resumed by {sender}.")
+        router.continue_routing(channel)
+        store.add("system", f"Routing resumed by {sender}.", channel=channel)
         await broadcast_status()
         return
 
     if low_text == "/roastreview":
         agent_names = list(config.get("agents", {}).keys())
         mentions = " ".join(f"@{a}" for a in agent_names)
-        store.add(sender, f"{mentions} Time for a roast review! Inspect each other's work and constructively roast it.")
+        store.add(sender, f"{mentions} Time for a roast review! Inspect each other's work and constructively roast it.", channel=channel)
         return
 
     if low_text.startswith("/poetry"):
@@ -251,28 +291,32 @@ async def _handle_new_message(msg: dict):
             "limerick": "Write a limerick about the current state of this codebase.",
             "sonnet": "Write a sonnet about the current state of this codebase.",
         }
-        store.add(sender, f"{mentions} {prompts[form]}")
+        store.add(sender, f"{mentions} {prompts[form]}", channel=channel)
         return
 
-    targets = router.get_targets(sender, text)
+    targets = router.get_targets(sender, text, channel)
 
-    if router.is_paused:
+    if router.is_paused(channel):
         # Only emit the loop guard notice once per pause
-        if not router.guard_emitted:
-            router.guard_emitted = True
+        if not router.is_guard_emitted(channel):
+            router.set_guard_emitted(channel)
             store.add(
                 "system",
                 f"Loop guard: {router.max_hops} agent-to-agent hops reached. "
-                "Type /continue to resume."
+                "Type /continue to resume.",
+                channel=channel
             )
         return
 
     # Build a readable message string for the wake prompt
     chat_msg = f"{sender}: {text}" if text else ""
 
+    import mcp_bridge
     for target in targets:
+        if not mcp_bridge.is_online(target):
+            store.add("system", f"{target} appears offline — message queued.", msg_type="system", channel=channel)
         if agents.is_available(target):
-            await agents.trigger(target, message=chat_msg)
+            await agents.trigger(target, message=chat_msg, channel=channel)
 
 
 # --- broadcasting ---
@@ -290,7 +334,7 @@ async def broadcast(msg: dict):
 
 async def broadcast_status():
     status = agents.get_status()
-    status["paused"] = router.is_paused
+    status["paused"] = any(router.is_paused(ch) for ch in room_settings.get("channels", ["general"]))
     data = json.dumps({"type": "status", "data": status})
     dead = set()
     for client in ws_clients:
@@ -312,8 +356,11 @@ async def broadcast_typing(agent_name: str, is_typing: bool):
     ws_clients.difference_update(dead)
 
 
-async def broadcast_clear():
-    data = json.dumps({"type": "clear"})
+async def broadcast_clear(channel: str | None = None):
+    payload = {"type": "clear"}
+    if channel:
+        payload["channel"] = channel
+    data = json.dumps(payload)
     dead = set()
     for client in ws_clients:
         try:
@@ -385,8 +432,17 @@ async def websocket_endpoint(websocket: WebSocket):
     # Send decisions
     await websocket.send_text(json.dumps({"type": "decisions", "data": decisions.list_all()}))
 
-    # Send history
-    history = store.get_recent(50)
+    # Send history (per channel based on history_limit)
+    limit_val = room_settings.get("history_limit", "all")
+    count = 10000 if limit_val == "all" else int(limit_val)
+    
+    history = []
+    for ch in room_settings["channels"]:
+        history.extend(store.get_recent(count, channel=ch))
+    
+    # Sort history by timestamp to interleave messages from different channels correctly
+    history.sort(key=lambda m: m.get("timestamp", 0))
+    
     for msg in history:
         await websocket.send_text(json.dumps({"type": "message", "data": msg}))
 
@@ -402,21 +458,32 @@ async def websocket_endpoint(websocket: WebSocket):
                 text = event.get("text", "").strip()
                 attachments = event.get("attachments", [])
                 sender = event.get("sender") or room_settings.get("username", "user")
+                channel = event.get("channel", "general")
 
                 if not text and not attachments:
                     continue
 
-                # /clear command
-                if text.lower() == "/clear":
-                    store.clear()
-                    await broadcast_clear()
-                    continue
+                # Command handling
+                if text.startswith("/"):
+                    cmd_parts = text.split()
+                    cmd = cmd_parts[0].lower()
+                    if cmd == "/clear":
+                        store.clear(channel=channel)
+                        await broadcast_clear(channel=channel)
+                        continue
+                    if cmd == "/continue":
+                        router.continue_routing()
+                        store.add("system", "Resuming agent conversation...", msg_type="system", channel=channel)
+                        await broadcast_status()
+                        continue
+                    # Other slash commands (roastreview, poetry) are handled by agents reading the chat.
+                    # We just need to make sure the trigger message has the right channel (which store.add does).
 
                 # Store message — the on_message callback handles broadcast + triggers
                 reply_to = event.get("reply_to")
                 if reply_to is not None:
                     reply_to = int(reply_to)
-                store.add(sender, text, attachments=attachments, reply_to=reply_to)
+                store.add(sender, text, attachments=attachments, reply_to=reply_to, channel=channel)
 
             elif event.get("type") == "delete":
                 ids = event.get("ids", [])
@@ -512,6 +579,71 @@ async def websocket_endpoint(websocket: WebSocket):
                         router.max_hops = hops
                     except (ValueError, TypeError):
                         pass
+                if "history_limit" in new:
+                    val = str(new["history_limit"]).strip().lower()
+                    if val == "all":
+                        room_settings["history_limit"] = "all"
+                    else:
+                        try:
+                            val_int = int(val)
+                            room_settings["history_limit"] = max(1, min(val_int, 10000))
+                        except (ValueError, TypeError):
+                            pass
+                _save_settings()
+                await broadcast_settings()
+
+            elif event.get("type") == "channel_create":
+                name = (event.get("name") or "").strip().lower()
+                if not name or not _CHANNEL_NAME_RE.match(name):
+                    continue
+                if name in room_settings["channels"]:
+                    continue
+                if len(room_settings["channels"]) >= MAX_CHANNELS:
+                    continue
+                room_settings["channels"].append(name)
+                _save_settings()
+                await broadcast_settings()
+
+            elif event.get("type") == "channel_rename":
+                old_name = (event.get("old_name") or "").strip().lower()
+                new_name = (event.get("new_name") or "").strip().lower()
+                if old_name == "general":
+                    continue
+                if not new_name or not _CHANNEL_NAME_RE.match(new_name):
+                    continue
+                if old_name not in room_settings["channels"]:
+                    continue
+                if new_name in room_settings["channels"]:
+                    continue
+                idx = room_settings["channels"].index(old_name)
+                room_settings["channels"][idx] = new_name
+                store.rename_channel(old_name, new_name)
+                import mcp_bridge
+                mcp_bridge.migrate_cursors_rename(old_name, new_name)
+                _save_settings()
+                await broadcast_settings()
+                # Tell clients to migrate DOM elements
+                rename_event = json.dumps({
+                    "type": "channel_renamed",
+                    "old_name": old_name,
+                    "new_name": new_name,
+                })
+                for c in list(ws_clients):
+                    try:
+                        await c.send_text(rename_event)
+                    except Exception:
+                        pass
+
+            elif event.get("type") == "channel_delete":
+                name = (event.get("name") or "").strip().lower()
+                if name == "general":
+                    continue
+                if name not in room_settings["channels"]:
+                    continue
+                room_settings["channels"].remove(name)
+                store.delete_channel(name)
+                import mcp_bridge
+                mcp_bridge.migrate_cursors_delete(name)
                 _save_settings()
                 await broadcast_settings()
 
@@ -563,13 +695,22 @@ async def get_messages(since_id: int = 0, limit: int = 50):
 @app.get("/api/status")
 async def get_status():
     status = agents.get_status()
-    status["paused"] = router.is_paused
+    status["paused"] = any(router.is_paused(ch) for ch in room_settings.get("channels", ["general"]))
     return status
 
 
 @app.get("/api/settings")
 async def get_settings():
     return room_settings
+
+
+@app.post("/api/heartbeat/{agent_name}")
+async def heartbeat(agent_name: str):
+    """Wrapper calls this every 60s to keep presence alive."""
+    import mcp_bridge
+    with mcp_bridge._presence_lock:
+        mcp_bridge._presence[agent_name] = __import__("time").time()
+    return {"ok": True}
 
 
 # --- Open agent session in terminal ---

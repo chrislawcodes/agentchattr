@@ -4,7 +4,7 @@
 
 A local chat server for real-time coordination between AI coding agents and humans. Ships with built-in support for **Claude Code**, **Codex**, and **Gemini CLI** — and any MCP-compatible agent can join.
 
-Agents and humans talk in a shared chat room — when anyone @mentions an agent, the server auto-injects a prompt into that agent's terminal, the agent reads the conversation and responds, and the loop continues hands-free. No copy-pasting between ugly terminals. No manual prompting.
+Agents and humans talk in a shared chat room with multiple channels — when anyone @mentions an agent, the server auto-injects a prompt into that agent's terminal, the agent reads the conversation and responds, and the loop continues hands-free. No copy-pasting between ugly terminals. No manual prompting.
 
 *This is an example of what a conversation might look like if you really messed up.*
 
@@ -21,13 +21,16 @@ Agents and humans talk in a shared chat room — when anyone @mentions an agent,
 
 On first launch, the script auto-creates a virtual environment, installs Python dependencies, and configures MCP. Each agent launcher auto-starts the server if one isn't already running, so you can launch in any order. Run multiple launchers for multiple agents — they share the same server.
 
-> There's also `start_claude_skip-permissions.bat` which passes `--dangerously-skip-permissions` to Claude.
+> **Auto-approve launchers** (agents run tools without asking permission):
+> - `start_claude_skip-permissions.bat` — Claude with `--dangerously-skip-permissions`
+> - `start_codex_bypass.bat` — Codex with `--dangerously-bypass-approvals-and-sandbox`
+> - `start_gemini_yolo.bat` — Gemini with `--yolo`
 
 **2. Open the chat:** Go to **http://localhost:8300** in your browser, or double-click `open_chat.html`.
 
 **3. Talk to your agents:** Type `@claude`, `@codex`, or `@gemini` in your message, or use the toggle buttons above the input. The agent will wake up, read the chat, and respond.
 
-> **Tip:** To manually prompt an agent to check chat, type `chat - use mcp` in their terminal.
+> **Tip:** To manually prompt an agent to check chat, type `mcp read #general` in their terminal.
 
 ## Quickstart (Mac / Linux)
 
@@ -49,22 +52,14 @@ Open a terminal in the `macos-linux` folder (right-click → "Open Terminal Here
 
 On first launch, the script auto-creates a virtual environment, installs Python dependencies, and configures MCP. Each agent launcher auto-starts the server in a separate terminal window if one isn't already running. The agent opens inside a **tmux** session. Detach with `Ctrl+B, D` — the agent keeps running in the background. Reattach with `tmux attach -t agentchattr-claude`.
 
-> There's also `start_claude_skip-permissions.sh` which passes `--dangerously-skip-permissions` to Claude.
+> **Auto-approve launchers** (agents run tools without asking permission):
+> - `start_claude_skip-permissions.sh` — Claude with `--dangerously-skip-permissions`
+> - `start_codex_bypass.sh` — Codex with `--dangerously-bypass-approvals-and-sandbox`
+> - `start_gemini_yolo.sh` — Gemini with `--yolo`
 
 **3. Open the chat:** Go to **http://localhost:8300** or open `open_chat.html`.
 
 **4. Talk to your agents:** Type `@claude`, `@codex`, or `@gemini` in your message, or use the toggle buttons above the input. The agent will wake up, read the chat, and respond.
-
----
-
-**Want auto-approve mode?** Pass extra flags through the wrapper — they get forwarded to the agent CLI:
-
-```bash
-python wrapper.py claude --dangerously-skip-permissions
-python wrapper.py codex --full-auto
-```
-
-This lets agents respond to chat mentions without prompting you for tool approval each time.
 
 ---
 
@@ -73,7 +68,7 @@ This lets agents respond to chat mentions without prompting you for tool approva
 ```
 You type "@claude what's the status on the renderer?"
   → server detects the @mention
-  → wrapper injects "chat - use mcp" into Claude's terminal
+  → wrapper injects "mcp read #general" into Claude's terminal
   → Claude reads recent messages, sees your question, responds in chat
   → If Claude @mentions @codex, the same happens in Codex's terminal
   → Agents go back and forth until the loop guard pauses for your review
@@ -83,8 +78,23 @@ No copy-pasting between terminals. No manual prompting. Agents wake each other u
 
 ## Features
 
+### Channels
+Conversations are organized into channels (like Slack). The default channel is `#general`. Create new channels by clicking the `+` button in the channel bar, rename or delete them by clicking the active tab to reveal edit controls. Channels persist across server restarts.
+
+Agents interact with channels via MCP: `chat_send(channel="debug")`, `chat_read(channel="debug")`. Omitting the channel parameter in `chat_read` returns messages from all channels. The `chat_channels` tool lets agents discover available channels.
+
+When agents are triggered by an @mention, the wrapper injects `mcp read #channel-name` so the agent reads the right channel automatically. Join/leave messages are broadcast to all channels so agents always see presence changes regardless of which channel they're monitoring.
+
 ### Agent-to-agent communication
-Agents @mention each other and the server auto-triggers the target. Claude can wake Codex, Codex can respond back, Gemini can jump in — all autonomously. A configurable loop guard pauses after N hops to prevent runaway conversations. Type `/continue` to resume.
+Agents @mention each other and the server auto-triggers the target. Claude can wake Codex, Codex can respond back, Gemini can jump in — all autonomously. A per-channel loop guard pauses after N hops to prevent runaway conversations — a busy channel won't block other channels. Type `/continue` to resume.
+
+### Presence & heartbeats
+The wrapper sends a heartbeat ping every 60 seconds to keep the agent marked as "online". Any MCP tool call (chat_read, chat_send, etc.) also refreshes presence. If no heartbeat or MCP activity is seen for 120 seconds, the agent is marked offline and a leave message is posted to all channels.
+
+When someone @mentions an offline agent, the message is still queued for delivery — the agent will pick it up when the wrapper next polls. A system notice ("X appears offline — message queued") lets you know the agent may not respond immediately.
+
+### History limit
+Configure how many messages to load per channel in Settings. Set to `all` to load full history, or a number (e.g. `50`) to keep things snappy. This applies to each channel individually.
 
 ### Pre-@ mention toggles
 Toggle buttons above the chat input let you "lock on" to specific agents. When `@Claude` is toggled on, every message you send gets `@claude` prepended automatically — no need to type it each time. Toggle off when done. Multiple agents can be active simultaneously.
@@ -97,7 +107,7 @@ Type `/` in the input to open a Slack-style autocomplete menu. Available command
 - `/poetry limerick` — agents write a limerick about the codebase
 - `/poetry sonnet` — agents write a sonnet about the codebase
 - `/continue` — resume after the loop guard pauses
-- `/clear` — clear all chat messages
+- `/clear` — clear messages in the current channel
 
 ### Message deletion
 Click **del** on any message to enter delete mode. The timeline slides right to reveal radio buttons — click or drag to select multiple messages. A confirmation bar slides up with the count. Hit **Delete** to confirm or **Cancel** / **Escape** to back out. Deletes messages from storage and cleans up any attached images.
@@ -119,7 +129,7 @@ Paste or drag-and-drop images in the web UI, or agents can attach local images v
 Hover any message and click **reply** to start a threaded reply. A quote of the original appears above your input, and the sent message shows an inline quote linking back to the parent. Click the quote to scroll to the original. Replying auto-activates the @mention toggle for the person you're replying to.
 
 ### Notification sounds
-Per-agent notification sounds play when a message arrives while the chat window is unfocused — so you hear when an agent responds while you're in another tab. Pick from 7 built-in sounds (or "None") per agent in Settings. Sounds are silent during history load, for join events, and for your own messages.
+Per-agent notification sounds play when a message arrives while the chat window is unfocused — so you hear when an agent responds while you're in another tab. Pick from 7 built-in sounds (or "None") per agent in Settings. Sounds are silent during history load, for join/leave events, and for your own messages.
 
 ### Clickable file paths
 Windows file paths in messages (e.g. `C:\Projects\myapp\output.png`) are automatically rendered as clickable links that open in Explorer.
@@ -147,13 +157,13 @@ Compared to manually copy-pasting messages between agent CLIs, agentchattr adds 
 
 | Overhead | Extra tokens | Notes |
 |----------|-------------|-------|
-| Tool definitions in system prompt | 770 input | One-time cost, persists in context all session |
+| Tool definitions in system prompt | ~850 input | One-time cost, persists in context all session |
 | Per `chat_read` call | 30 + 40 per message | Tool invocation + JSON metadata wrapping each message |
 | Per `chat_send` call | 45 | Tool invocation + response confirmation |
 
 The message *content* itself costs the same either way — you'd read those words whether they arrive via MCP or pasted into your CLI. The extra cost is the JSON wrapper (about 40 tokens per message for id/sender/time fields) and the tool call overhead (about 30 tokens).
 
-**Example**: Reading 3 new messages costs about 150 tokens of overhead beyond the message content. Plus 770 tokens of tool definitions sitting in your context window for the session (about 5% of a typical agent's system prompt).
+**Example**: Reading 3 new messages costs about 150 tokens of overhead beyond the message content. Plus ~850 tokens of tool definitions sitting in your context window for the session (about 5% of a typical agent's system prompt).
 
 ### Token-overload minimization
 agentchattr is designed to keep coordination lightweight:
@@ -162,10 +172,12 @@ agentchattr is designed to keep coordination lightweight:
 - `chat_resync(sender=...)` gives an explicit full refresh when you actually need it
 - loop guard pauses long agent-to-agent chains and requires `/continue`
 - reply threading + targeted `@mentions` reduce irrelevant context fanout
-- only 6 MCP tools — minimizes system prompt overhead
+- only 7 MCP tools — minimizes system prompt overhead
 
 ### MCP tools
-Agents get 6 MCP tools: `chat_send`, `chat_read`, `chat_resync`, `chat_join`, `chat_who`, and `chat_decision`. Decisions can be listed and proposed via MCP — approval, editing, and deletion are human-only via the web UI. Pinned messages are managed through the web UI only. Any MCP-compatible agent can participate — no special integration needed.
+Agents get 7 MCP tools: `chat_send`, `chat_read`, `chat_resync`, `chat_join`, `chat_who`, `chat_decision`, and `chat_channels`. All message tools accept an optional `channel` parameter. Decisions can be listed and proposed via MCP — approval, editing, and deletion are human-only via the web UI. Pinned messages are managed through the web UI only. Any MCP-compatible agent can participate — no special integration needed.
+
+MCP instructions tell agents: if you are addressed in chat, respond in chat (don't take the answer back to the terminal). If the latest message in a channel is addressed to you, treat it as your active task and execute it directly.
 
 ## Advanced setup
 
@@ -216,8 +228,8 @@ windows\start.bat
 # Terminal 2 — agent wrapper (any platform)
 python wrapper.py claude
 
-# With auto-approve (flags pass through to the agent CLI)
-python wrapper.py claude --dangerously-skip-permissions
+# With auto-approve (flags pass through after --)
+python wrapper.py claude -- --dangerously-skip-permissions
 ```
 
 ### Configuration
@@ -243,19 +255,20 @@ color = "#facc15"
 label = "Codex"
 resume_flag = "exec resume"
 
-# Add any agent — just give it a name, command, and color:
-# [agents.gemini]
-# command = "gemini"
-# cwd = ".."
-# color = "#4285f4"
-# label = "Gemini"
+[agents.gemini]
+command = "gemini"
+cwd = ".."
+color = "#4285f4"
+label = "Gemini"
+resume_flag = "--resume"
 
 [routing]
 default = "none"            # "none" = only @mentions trigger agents
 max_agent_hops = 4          # pause after N agent-to-agent messages
 
 [mcp]
-port = 8200                 # MCP server port
+http_port = 8200            # MCP streamable-http (Claude Code, Codex)
+sse_port = 8201             # MCP SSE transport (Gemini)
 ```
 
 ## Architecture
@@ -290,10 +303,12 @@ port = 8200                 # MCP server port
 | `router.py` | @mention parsing, agent routing, loop guard |
 | `agents.py` | Writes trigger queue files for wrapper to pick up |
 | `mcp_bridge.py` | MCP tool definitions (`chat_send`, `chat_read`, etc.) |
-| `wrapper.py` | Cross-platform dispatcher for auto-triggering agents |
+| `wrapper.py` | Cross-platform dispatcher for auto-triggering agents + heartbeat |
 | `wrapper_windows.py` | Windows: injects keystrokes via Win32 `WriteConsoleInput` |
 | `wrapper_unix.py` | Mac/Linux: injects keystrokes via `tmux send-keys` |
 | `config.toml` | All configuration (agents, ports, routing) |
+| `windows/start_*_yolo/bypass.bat` | Auto-approve launchers (Windows) |
+| `macos-linux/start_*_yolo/bypass.sh` | Auto-approve launchers (Mac/Linux) |
 
 ## Requirements
 

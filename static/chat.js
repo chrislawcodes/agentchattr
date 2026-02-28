@@ -15,8 +15,12 @@ let decisions = [];  // array of decision objects from server
 let activeMentions = new Set();  // agent names with pre-@ toggled on
 let replyingTo = null;  // { id, sender, text } or null
 let unreadCount = 0;    // messages received while scrolled up
-let lastMessageDate = null;  // track date for dividers
+let lastMessageDate = null;  // track date for dividers (general channel)
+let lastMessageDates = {};  // { channel: dateString } for per-channel dividers
 let soundEnabled = false;  // suppress sounds during initial history load
+let activeChannel = localStorage.getItem('agentchattr-channel') || 'general';
+let channelList = ['general'];
+let channelUnread = {};  // { channelName: count }
 
 // --- Notification sounds ---
 const SOUND_OPTIONS = [
@@ -131,6 +135,13 @@ function init() {
     setupKeyboardShortcuts();
     setupDecisionForm();
     setupDecisionGrip();
+
+    // Dismiss channel edit controls when clicking outside channel bar
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('#channel-bar')) {
+            document.querySelectorAll('.channel-tab.editing').forEach(t => t.classList.remove('editing'));
+        }
+    });
 }
 
 function renderMarkdown(text) {
@@ -227,7 +238,7 @@ function connectWebSocket() {
         const event = JSON.parse(e.data);
         if (event.type === 'message') {
             // Play notification sound for new messages from others (not joins, not when focused)
-            if (soundEnabled && !document.hasFocus() && event.data.type !== 'join' && event.data.sender && event.data.sender.toLowerCase() !== username.toLowerCase()) {
+            if (soundEnabled && !document.hasFocus() && event.data.type !== 'join' && event.data.type !== 'leave' && event.data.sender && event.data.sender.toLowerCase() !== username.toLowerCase()) {
                 playNotificationSound(event.data.sender);
             }
             appendMessage(event.data);
@@ -253,6 +264,8 @@ function connectWebSocket() {
                 soundEnabled = true;
                 const loader = document.getElementById('loading-indicator');
                 if (loader) loader.classList.add('hidden');
+                filterMessagesByChannel();
+                renderChannelTabs();
             }
         } else if (event.type === 'typing') {
             updateTyping(event.agent, event.active);
@@ -266,13 +279,55 @@ function connectWebSocket() {
             updateDecisionsBadge();
         } else if (event.type === 'decision') {
             handleDecisionEvent(event.action, event.data);
+        } else if (event.type === 'channel_renamed') {
+            // Migrate data-channel on existing DOM elements
+            const container = document.getElementById('messages');
+            for (const el of container.children) {
+                if ((el.dataset.channel || 'general') === event.old_name) {
+                    el.dataset.channel = event.new_name;
+                }
+            }
+            // Update per-channel date tracking
+            if (lastMessageDates[event.old_name]) {
+                lastMessageDates[event.new_name] = lastMessageDates[event.old_name];
+                delete lastMessageDates[event.old_name];
+            }
+            // Update active channel if we were on the renamed one
+            if (activeChannel === event.old_name) {
+                activeChannel = event.new_name;
+                localStorage.setItem('agentchattr-channel', event.new_name);
+            }
         } else if (event.type === 'clear') {
-            document.getElementById('messages').innerHTML = '';
-            lastMessageDate = null;
+            const clearChannel = event.channel || null;
+            if (clearChannel) {
+                // Per-channel clear: remove only messages from that channel
+                const container = document.getElementById('messages');
+                const toRemove = [];
+                for (const el of container.children) {
+                    if (el.dataset.id && (el.dataset.channel || 'general') === clearChannel) {
+                        toRemove.push(el);
+                    }
+                }
+                toRemove.forEach(el => el.remove());
+                // Clean up orphaned date dividers
+                filterMessagesByChannel();
+            } else {
+                // Full clear (all channels)
+                document.getElementById('messages').innerHTML = '';
+                lastMessageDate = null;
+                lastMessageDates = {};
+            }
         }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (e) => {
+        // Server sends 4003 when session token is invalid (server restarted).
+        // Auto-reload to pick up the fresh token from the new HTML page.
+        if (e.code === 4003) {
+            console.warn('Session token rejected (server restarted?) — reloading page...');
+            location.reload();
+            return;
+        }
         console.log('Disconnected, reconnecting in 2s...');
         soundEnabled = false;  // suppress sounds during reconnect history replay
         const loader = document.getElementById('loading-indicator');
@@ -314,10 +369,14 @@ function formatDateDivider(dateStr) {
 
 function maybeInsertDateDivider(container, msg) {
     const msgDate = getMessageDate(msg);
-    if (msgDate !== lastMessageDate) {
-        lastMessageDate = msgDate;
+    const channel = msg.channel || 'general';
+    const lastDate = lastMessageDates[channel];
+    
+    if (msgDate !== lastDate) {
+        lastMessageDates[channel] = msgDate;
         const divider = document.createElement('div');
         divider.className = 'date-divider';
+        divider.dataset.channel = channel;
         divider.innerHTML = `<span>${formatDateDivider(msgDate)}</span>`;
         container.appendChild(divider);
     }
@@ -334,6 +393,8 @@ function appendMessage(msg) {
     const el = document.createElement('div');
     el.className = 'message';
     el.dataset.id = msg.id;
+    const msgChannel = msg.channel || 'general';
+    el.dataset.channel = msgChannel;
 
     if (msg.type === 'join' || msg.type === 'leave') {
         el.classList.add('join-msg');
@@ -387,7 +448,19 @@ function appendMessage(msg) {
         addCodeCopyButtons(el);
     }
 
+    // Hide messages from other channels
+    if (msgChannel !== activeChannel) {
+        el.style.display = 'none';
+        // Track unread for background channels (skip joins/leaves and initial history load)
+        if (soundEnabled && msg.type !== 'join' && msg.type !== 'leave') {
+            channelUnread[msgChannel] = (channelUnread[msgChannel] || 0) + 1;
+            renderChannelTabs();
+        }
+    }
+
     container.appendChild(el);
+
+    if (msgChannel !== activeChannel) return;  // don't scroll for hidden messages
 
     if (autoScroll) {
         scrollToBottom();
@@ -565,6 +638,8 @@ function updateTyping(agent, active) {
 
 // --- Settings ---
 
+let pendingChannelSwitch = null;
+
 function applySettings(data) {
     if (data.title) {
         document.getElementById('room-title').textContent = data.title;
@@ -584,6 +659,30 @@ function applySettings(data) {
     if (data.max_agent_hops !== undefined) {
         document.getElementById('setting-hops').value = data.max_agent_hops;
     }
+    if (data.history_limit !== undefined) {
+        const histAll = document.getElementById('setting-history-all');
+        const histNum = document.getElementById('setting-history');
+        const isAll = data.history_limit === 'all' || data.history_limit === '';
+        histAll.checked = isAll;
+        histNum.disabled = isAll;
+        histNum.value = isAll ? '' : data.history_limit;
+    }
+    if (data.channels && Array.isArray(data.channels)) {
+        channelList = data.channels;
+        // If active channel was deleted, switch to general
+        if (!channelList.includes(activeChannel)) {
+            activeChannel = 'general';
+            localStorage.setItem('agentchattr-channel', 'general');
+            filterMessagesByChannel();
+        }
+        renderChannelTabs();
+
+        if (pendingChannelSwitch && channelList.includes(pendingChannelSwitch)) {
+            const name = pendingChannelSwitch;
+            pendingChannelSwitch = null;
+            switchChannel(name);
+        }
+    }
 }
 
 function toggleSettings() {
@@ -595,9 +694,9 @@ function toggleSettings() {
 }
 
 function clearChat() {
-    if (!confirm('Clear all chat messages? This cannot be undone.')) return;
+    if (!confirm(`Clear all messages in #${activeChannel}? This cannot be undone.`)) return;
     if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'message', text: '/clear', sender: username }));
+        ws.send(JSON.stringify({ type: 'message', text: '/clear', sender: username, channel: activeChannel }));
     }
     document.getElementById('settings-bar').classList.add('hidden');
 }
@@ -607,6 +706,9 @@ function saveSettings() {
     const newTitle = document.getElementById('setting-title').value.trim();
     const newFont = document.getElementById('setting-font').value;
     const newHops = document.getElementById('setting-hops').value;
+    const histAll = document.getElementById('setting-history-all').checked;
+    const histNum = document.getElementById('setting-history').value.trim();
+    const newHistory = histAll ? 'all' : (parseInt(histNum) || 50);
 
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({
@@ -616,6 +718,7 @@ function saveSettings() {
                 title: newTitle || 'agentchattr',
                 font: newFont,
                 max_agent_hops: parseInt(newHops) || 4,
+                history_limit: newHistory,
             }
         }));
     }
@@ -625,7 +728,7 @@ function saveSettings() {
 
 function setupSettingsKeys() {
     // Save on Enter in settings fields
-    for (const id of ['setting-username', 'setting-title', 'setting-hops']) {
+    for (const id of ['setting-username', 'setting-title', 'setting-hops', 'setting-history']) {
         document.getElementById(id).addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
@@ -636,6 +739,13 @@ function setupSettingsKeys() {
             }
         });
     }
+    // History "all" checkbox toggles number field
+    document.getElementById('setting-history-all').addEventListener('change', (e) => {
+        const numField = document.getElementById('setting-history');
+        numField.disabled = e.target.checked;
+        if (!e.target.checked) numField.focus();
+    });
+
     // Also handle the select
     document.getElementById('setting-font').addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
@@ -657,6 +767,7 @@ function setupKeyboardShortcuts() {
         }
         if (modalOpen && e.key === 'ArrowLeft') { e.preventDefault(); modalPrev(e); }
         if (modalOpen && e.key === 'ArrowRight') { e.preventDefault(); modalNext(e); }
+
     });
 }
 
@@ -668,7 +779,7 @@ const SLASH_COMMANDS = [
     { cmd: '/poetry limerick', desc: 'Agents write a limerick about the codebase' },
     { cmd: '/poetry sonnet', desc: 'Agents write a sonnet about the codebase' },
     { cmd: '/continue', desc: 'Resume after loop guard pauses' },
-    { cmd: '/clear', desc: 'Clear all chat messages' },
+    { cmd: '/clear', desc: 'Clear messages in current channel' },
 ];
 
 let slashMenuIndex = 0;
@@ -790,6 +901,7 @@ function sendMessage() {
         type: 'message',
         text: text,
         sender: username,
+        channel: activeChannel,
         attachments: pendingAttachments.map(a => ({
             path: a.path,
             name: a.name,
@@ -1254,10 +1366,327 @@ function renderTodosPanel() {
 
         const check = status === 'done' ? '&#10003;' : '&#9675;';
         const checkClass = status === 'done' ? 'todo-check done' : 'todo-check';
+        const msgChannel = el.dataset.channel || 'general';
 
-        item.innerHTML = `<button class="${checkClass}" onclick="todoToggle(${id})">${check}</button><span class="msg-time">${escapeHtml(time)}</span> <span class="msg-sender" style="color: ${senderColor}">${escapeHtml(sender)}</span> <span class="msg-text">${escapeHtml(text)}</span><button class="todo-remove-btn" onclick="todoRemove(${id})" title="Remove from todos">&times;</button>`;
+        item.innerHTML = `<button class="${checkClass}" onclick="todoToggle(${id})">${check}</button><span class="msg-time" style="color:var(--accent);font-weight:600;margin-right:4px">#${msgChannel}</span> <span class="msg-time">${escapeHtml(time)}</span> <span class="msg-sender" style="color: ${senderColor}">${escapeHtml(sender)}</span> <span class="msg-text">${escapeHtml(text)}</span><button class="todo-remove-btn" onclick="todoRemove(${id})" title="Remove from todos">&times;</button>`;
+        item.addEventListener('click', (e) => {
+            if (e.target.closest('button')) return;
+            // Cross-channel pin: switch channel if needed
+            const msgChannel = el.dataset.channel || 'general';
+            if (msgChannel !== activeChannel) {
+                switchChannel(msgChannel);
+            }
+            scrollToMessage(id);
+            togglePinsPanel();
+        });
         list.appendChild(item);
     }
+}
+
+// --- Channels ---
+
+function renderChannelTabs() {
+    const container = document.getElementById('channel-tabs');
+    if (!container) return;
+
+    // Preserve inline create input if it exists
+    const existingCreate = container.querySelector('.channel-inline-create');
+    container.innerHTML = '';
+
+    for (const name of channelList) {
+        const tab = document.createElement('button');
+        tab.className = 'channel-tab' + (name === activeChannel ? ' active' : '');
+        tab.dataset.channel = name;
+
+        const label = document.createElement('span');
+        label.className = 'channel-tab-label';
+        label.textContent = '# ' + name;
+        tab.appendChild(label);
+
+        const unread = channelUnread[name] || 0;
+        if (unread > 0 && name !== activeChannel) {
+            const dot = document.createElement('span');
+            dot.className = 'channel-unread-dot';
+            dot.textContent = unread > 99 ? '99+' : unread;
+            tab.appendChild(dot);
+        }
+
+        // Edit + delete icons for non-general tabs (visible on hover via CSS)
+        if (name !== 'general') {
+            const actions = document.createElement('span');
+            actions.className = 'channel-tab-actions';
+
+            const editBtn = document.createElement('button');
+            editBtn.className = 'ch-edit-btn';
+            editBtn.title = 'Rename';
+            editBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M11.5 2.5l2 2L5 13H3v-2L11.5 2.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>';
+            editBtn.onclick = (e) => { e.stopPropagation(); showChannelRenameDialog(name); };
+            actions.appendChild(editBtn);
+
+            const delBtn = document.createElement('button');
+            delBtn.className = 'ch-delete-btn';
+            delBtn.title = 'Delete';
+            delBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M6 4V3h4v1M5 4v8.5h6V4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+            delBtn.onclick = (e) => { e.stopPropagation(); deleteChannel(name); };
+            actions.appendChild(delBtn);
+
+            tab.appendChild(actions);
+        }
+
+        tab.onclick = (e) => {
+            if (e.target.closest('.channel-tab-actions')) return;
+            if (name === activeChannel) {
+                // Second click on active tab — toggle edit controls
+                tab.classList.toggle('editing');
+            } else {
+                // Clear any editing state, switch channel
+                document.querySelectorAll('.channel-tab.editing').forEach(t => t.classList.remove('editing'));
+                switchChannel(name);
+            }
+        };
+
+        container.appendChild(tab);
+    }
+
+    // Re-append inline create if it was open
+    if (existingCreate) {
+        container.appendChild(existingCreate);
+    }
+
+    // Update add button disabled state
+    const addBtn = document.getElementById('channel-add-btn');
+    if (addBtn) {
+        addBtn.classList.toggle('disabled', channelList.length >= 8);
+    }
+}
+
+function switchChannel(name) {
+    if (name === activeChannel) return;
+    activeChannel = name;
+    channelUnread[name] = 0;
+    localStorage.setItem('agentchattr-channel', name);
+    filterMessagesByChannel();
+    renderChannelTabs();
+    scrollToBottom();
+}
+
+function filterMessagesByChannel() {
+    const container = document.getElementById('messages');
+    if (!container) return;
+
+    for (const el of container.children) {
+        const ch = el.dataset.channel || 'general';
+        el.style.display = ch === activeChannel ? '' : 'none';
+    }
+}
+
+function showChannelCreateDialog() {
+    if (channelList.length >= 8) return;
+    const tabs = document.getElementById('channel-tabs');
+    // Remove existing inline create if any
+    tabs.querySelector('.channel-inline-create')?.remove();
+
+    // Hide the + button while creating
+    const addBtn = document.getElementById('channel-add-btn');
+    if (addBtn) addBtn.style.display = 'none';
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'channel-inline-create';
+
+    const prefix = document.createElement('span');
+    prefix.className = 'channel-input-prefix';
+    prefix.textContent = '#';
+    wrapper.appendChild(prefix);
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.maxLength = 20;
+    input.placeholder = 'channel-name';
+    wrapper.appendChild(input);
+
+    const cleanup = () => { wrapper.remove(); if (addBtn) addBtn.style.display = ''; };
+
+    const confirm = document.createElement('button');
+    confirm.className = 'confirm-btn';
+    confirm.innerHTML = '&#10003;';
+    confirm.title = 'Create';
+    confirm.onclick = () => { submitInlineCreate(input, wrapper); if (addBtn) addBtn.style.display = ''; };
+    wrapper.appendChild(confirm);
+
+    const cancel = document.createElement('button');
+    cancel.className = 'cancel-btn';
+    cancel.innerHTML = '&#10005;';
+    cancel.title = 'Cancel';
+    cancel.onclick = cleanup;
+    wrapper.appendChild(cancel);
+
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); submitInlineCreate(input, wrapper); if (addBtn) addBtn.style.display = ''; }
+        if (e.key === 'Escape') cleanup();
+    });
+    input.addEventListener('input', () => {
+        input.value = input.value.toLowerCase().replace(/[^a-z0-9\-]/g, '');
+    });
+
+    tabs.appendChild(wrapper);
+    input.focus();
+}
+
+function submitInlineCreate(input, wrapper) {
+    const name = input.value.trim().toLowerCase();
+    if (!name || !/^[a-z0-9][a-z0-9\-]{0,19}$/.test(name)) return;
+    if (channelList.includes(name)) { input.focus(); return; }
+    pendingChannelSwitch = name;
+    ws.send(JSON.stringify({ type: 'channel_create', name }));
+    wrapper.remove();
+}
+
+function showChannelRenameDialog(oldName) {
+    // Reuse inline create pattern but for rename
+    const tabs = document.getElementById('channel-tabs');
+    tabs.querySelector('.channel-inline-create')?.remove();
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'channel-inline-create';
+
+    const prefix = document.createElement('span');
+    prefix.className = 'channel-input-prefix';
+    prefix.textContent = '#';
+    wrapper.appendChild(prefix);
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.maxLength = 20;
+    input.value = oldName;
+    wrapper.appendChild(input);
+
+    const confirm = document.createElement('button');
+    confirm.className = 'confirm-btn';
+    confirm.innerHTML = '&#10003;';
+    confirm.title = 'Rename';
+    confirm.onclick = () => {
+        const newName = input.value.trim().toLowerCase();
+        if (!newName || !/^[a-z0-9][a-z0-9\-]{0,19}$/.test(newName)) return;
+        if (newName !== oldName) {
+            ws.send(JSON.stringify({ type: 'channel_rename', old_name: oldName, new_name: newName }));
+            if (activeChannel === oldName) {
+                activeChannel = newName;
+                localStorage.setItem('agentchattr-channel', newName);
+            }
+        }
+        wrapper.remove();
+    };
+    wrapper.appendChild(confirm);
+
+    const cancel = document.createElement('button');
+    cancel.className = 'cancel-btn';
+    cancel.innerHTML = '&#10005;';
+    cancel.title = 'Cancel';
+    cancel.onclick = () => wrapper.remove();
+    wrapper.appendChild(cancel);
+
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); confirm.click(); }
+        if (e.key === 'Escape') wrapper.remove();
+    });
+    input.addEventListener('input', () => {
+        input.value = input.value.toLowerCase().replace(/[^a-z0-9\-]/g, '');
+    });
+
+    tabs.appendChild(wrapper);
+    input.select();
+}
+
+function deleteChannel(name) {
+    if (name === 'general') return;
+    const tab = document.querySelector(`.channel-tab[data-channel="${name}"]`);
+    if (!tab || tab.classList.contains('confirm-delete')) return;
+
+    const label = tab.querySelector('.channel-tab-label');
+    const actions = tab.querySelector('.channel-tab-actions');
+    const originalText = label.textContent;
+    const originalOnclick = tab.onclick;
+
+    tab.classList.add('confirm-delete');
+    tab.classList.remove('editing');
+    label.textContent = `delete #${name}?`;
+    if (actions) actions.style.display = 'none';
+
+    // Add confirm/cancel buttons
+    const confirmBar = document.createElement('span');
+    confirmBar.className = 'channel-delete-confirm';
+
+    const tickBtn = document.createElement('button');
+    tickBtn.className = 'ch-confirm-yes';
+    tickBtn.title = 'Confirm delete';
+    tickBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.5 3.5 6.5-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+    const crossBtn = document.createElement('button');
+    crossBtn.className = 'ch-confirm-no';
+    crossBtn.title = 'Cancel';
+    crossBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+
+    confirmBar.appendChild(tickBtn);
+    confirmBar.appendChild(crossBtn);
+    tab.appendChild(confirmBar);
+
+    const revert = () => {
+        tab.classList.remove('confirm-delete');
+        label.textContent = originalText;
+        if (actions) actions.style.display = '';
+        confirmBar.remove();
+        tab.onclick = originalOnclick;
+        document.removeEventListener('click', outsideClick);
+    };
+
+    tickBtn.onclick = (e) => {
+        e.stopPropagation();
+        revert();
+        ws.send(JSON.stringify({ type: 'channel_delete', name }));
+        if (activeChannel === name) switchChannel('general');
+    };
+
+    crossBtn.onclick = (e) => {
+        e.stopPropagation();
+        revert();
+    };
+
+    // Clicking the tab itself during confirm does nothing
+    tab.onclick = (e) => { e.stopPropagation(); };
+
+    const outsideClick = (e) => {
+        if (!tab.contains(e.target)) revert();
+    };
+    setTimeout(() => document.addEventListener('click', outsideClick), 0);
+}
+
+function showChannelContextMenu(name, x, y) {
+    document.querySelectorAll('.channel-ctx-menu').forEach(m => m.remove());
+
+    const menu = document.createElement('div');
+    menu.className = 'channel-ctx-menu';
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+
+    const renameBtn = document.createElement('button');
+    renameBtn.textContent = 'Rename';
+    renameBtn.onclick = () => { menu.remove(); showChannelRenameDialog(name); };
+    menu.appendChild(renameBtn);
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'danger';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.onclick = () => { menu.remove(); deleteChannel(name); };
+    menu.appendChild(deleteBtn);
+
+    document.body.appendChild(menu);
+
+    setTimeout(() => {
+        document.addEventListener('click', function handler() {
+            menu.remove();
+            document.removeEventListener('click', handler);
+        }, { once: true });
+    }, 0);
 }
 
 // --- Mention toggles ---

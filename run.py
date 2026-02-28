@@ -37,10 +37,11 @@ def main():
     configure(config, session_token=session_token)
 
     # Share stores with the MCP bridge
-    from app import store, decisions
+    from app import store, decisions, room_settings
     import mcp_bridge
     mcp_bridge.store = store
     mcp_bridge.decisions = decisions
+    mcp_bridge.room_settings = room_settings
 
     # Start MCP servers in background threads
     http_port = config.get("mcp", {}).get("http_port", 8200)

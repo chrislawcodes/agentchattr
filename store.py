@@ -12,6 +12,7 @@ class MessageStore:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._todos_path = self._path.parent / "todos.json"
         self._messages: list[dict] = []
+        self._next_id: int = 0  # monotonically increasing, survives deletions
         self._todos: dict[int, str] = {}  # msg_id → "todo" | "done"
         self._lock = threading.Lock()
         self._callbacks: list = []  # called on each new message
@@ -23,6 +24,7 @@ class MessageStore:
     def _load(self):
         if not self._path.exists():
             return
+        max_id = -1
         with open(self._path, "r", encoding="utf-8") as f:
             for i, line in enumerate(f):
                 line = line.strip()
@@ -30,29 +32,37 @@ class MessageStore:
                     continue
                 try:
                     msg = json.loads(line)
-                    msg["id"] = i
+                    # Preserve persisted ID; fall back to line number for legacy data
+                    if "id" not in msg:
+                        msg["id"] = i
+                    if msg["id"] > max_id:
+                        max_id = msg["id"]
                     self._messages.append(msg)
                 except json.JSONDecodeError:
                     continue
+        self._next_id = max_id + 1
 
     def on_message(self, callback):
         """Register a callback(msg) called whenever a message is added."""
         self._callbacks.append(callback)
 
     def add(self, sender: str, text: str, msg_type: str = "chat",
-            attachments: list | None = None, reply_to: int | None = None) -> dict:
+            attachments: list | None = None, reply_to: int | None = None,
+            channel: str = "general") -> dict:
         with self._lock:
             msg = {
-                "id": len(self._messages),
+                "id": self._next_id,
                 "sender": sender,
                 "text": text,
                 "type": msg_type,
                 "timestamp": time.time(),
                 "time": time.strftime("%H:%M:%S"),
                 "attachments": attachments or [],
+                "channel": channel,
             }
             if reply_to is not None:
                 msg["reply_to"] = reply_to
+            self._next_id += 1
             self._messages.append(msg)
             with open(self._path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(msg, ensure_ascii=False) + "\n")
@@ -68,17 +78,24 @@ class MessageStore:
 
     def get_by_id(self, msg_id: int) -> dict | None:
         with self._lock:
-            if 0 <= msg_id < len(self._messages):
-                return self._messages[msg_id]
+            for m in self._messages:
+                if m["id"] == msg_id:
+                    return m
             return None
 
-    def get_recent(self, count: int = 50) -> list[dict]:
+    def get_recent(self, count: int = 50, channel: str | None = None) -> list[dict]:
         with self._lock:
+            if channel:
+                filtered = [m for m in self._messages if m.get("channel", "general") == channel]
+                return list(filtered[-count:])
             return list(self._messages[-count:])
 
-    def get_since(self, since_id: int = 0) -> list[dict]:
+    def get_since(self, since_id: int = 0, channel: str | None = None) -> list[dict]:
         with self._lock:
-            return [m for m in self._messages if m["id"] > since_id]
+            msgs = [m for m in self._messages if m["id"] > since_id]
+            if channel:
+                msgs = [m for m in msgs if m.get("channel", "general") == channel]
+            return msgs
 
     def delete(self, msg_ids: list[int]) -> list[int]:
         """Delete messages by ID. Returns list of IDs actually deleted."""
@@ -131,12 +148,51 @@ class MessageStore:
             for m in self._messages:
                 f.write(json.dumps(m, ensure_ascii=False) + "\n")
 
-    def clear(self):
-        """Wipe all messages and truncate the log file."""
+    def clear(self, channel: str | None = None):
+        """Wipe messages and rewrite the log file.
+        If channel is given, only clear messages in that channel."""
         with self._lock:
-            self._messages.clear()
-            with open(self._path, "w", encoding="utf-8") as f:
-                f.truncate(0)
+            if channel:
+                removed_ids = {m["id"] for m in self._messages if m.get("channel", "general") == channel}
+                self._messages = [m for m in self._messages if m.get("channel", "general") != channel]
+                self._rewrite_jsonl()
+                # Clean up todos for cleared messages
+                for tid in list(self._todos.keys()):
+                    if tid in removed_ids:
+                        del self._todos[tid]
+                if removed_ids:
+                    self._save_todos()
+            else:
+                self._messages.clear()
+                self._path.write_text("")
+                self._todos.clear()
+                self._save_todos()
+
+    def rename_channel(self, old_name: str, new_name: str):
+        """Migrate all messages from old_name to new_name."""
+        with self._lock:
+            modified = False
+            for m in self._messages:
+                if m.get("channel") == old_name:
+                    m["channel"] = new_name
+                    modified = True
+            if modified:
+                self._rewrite_jsonl()
+
+    def delete_channel(self, name: str):
+        """Remove all messages belonging to a deleted channel."""
+        with self._lock:
+            original_len = len(self._messages)
+            # Collect IDs of messages being removed so we can clean up their todos
+            removed_ids = {m["id"] for m in self._messages if m.get("channel") == name}
+            self._messages = [m for m in self._messages if m.get("channel") != name]
+            if len(self._messages) != original_len:
+                self._rewrite_jsonl()
+                # Clean up todos that referenced deleted messages
+                for tid in list(self._todos.keys()):
+                    if tid in removed_ids:
+                        del self._todos[tid]
+                self._save_todos()
 
     # --- Todos ---
 
@@ -180,7 +236,7 @@ class MessageStore:
 
     def add_todo(self, msg_id: int) -> bool:
         with self._lock:
-            if msg_id < 0 or msg_id >= len(self._messages):
+            if not any(m["id"] == msg_id for m in self._messages):
                 return False
             self._todos[msg_id] = "todo"
             self._save_todos()

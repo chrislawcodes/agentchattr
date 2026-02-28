@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>agentchattr</title>
-    <link rel="stylesheet" href="/static/style.css?v=16">
+    <link rel="stylesheet" href="/static/style.css?v=26">
     <link rel="icon" href="/static/favicon.ico">
 </head>
 <body>
@@ -59,6 +59,13 @@
                 <label for="setting-hops">Loop guard</label>
                 <input type="number" id="setting-hops" min="1" max="50" value="4" title="Max agent-to-agent hops before pausing">
             </div>
+            <div class="settings-field">
+                <label>History limit</label>
+                <div class="history-limit-row">
+                    <label class="history-all-label"><input type="checkbox" id="setting-history-all"> all</label>
+                    <input type="number" id="setting-history" min="1" max="9999" placeholder="50" title="Messages to load per channel">
+                </div>
+            </div>
             <div class="settings-divider"></div>
             <div class="settings-field">
                 <label>Sounds</label>
@@ -75,6 +82,11 @@
                 <button onclick="togglePinsPanel()" class="pins-close">&times;</button>
             </div>
             <div id="pins-list"></div>
+        </div>
+
+        <div id="channel-bar">
+            <div id="channel-tabs"></div>
+            <button id="channel-add-btn" class="channel-add" onclick="showChannelCreateDialog()" title="Add channel">+</button>
         </div>
 
         <div id="content-area">
@@ -144,7 +156,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="/static/chat.js?v=14"></script>
+    <script src="/static/chat.js?v=26"></script>
 </body>
 </html>
 

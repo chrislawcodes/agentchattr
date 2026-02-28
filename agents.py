@@ -45,7 +45,7 @@ class AgentTrigger:
             for name, cfg in self._config.items()
         }
 
-    async def trigger(self, agent_name: str, message: str = "", **kwargs):
+    async def trigger(self, agent_name: str, message: str = "", channel: str = "general", **kwargs):
         """Write to the agent's queue file. The worker terminal picks it up."""
         queue_file = self._data_dir / f"{agent_name}_queue.jsonl"
         self._data_dir.mkdir(parents=True, exist_ok=True)
@@ -55,9 +55,10 @@ class AgentTrigger:
             "sender": message.split(":")[0].strip() if ":" in message else "?",
             "text": message,
             "time": time.strftime("%H:%M:%S"),
+            "channel": channel,
         }
 
         with open(queue_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
 
-        log.info("Queued @%s trigger: %s", agent_name, message[:80])
+        log.info("Queued @%s trigger (ch=%s): %s", agent_name, channel, message[:80])
