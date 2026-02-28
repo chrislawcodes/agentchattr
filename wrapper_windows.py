@@ -76,14 +76,115 @@ def inject(text: str):
     _write_key(handle, "\r", False, vk=VK_RETURN, scan=0x1C)
 
 
-def run_agent(command, extra_args, cwd, env, queue_file, agent, no_restart, start_watcher, strip_env=None):
+# ---------------------------------------------------------------------------
+# Activity detection — console screen buffer hashing
+# ---------------------------------------------------------------------------
+
+STD_OUTPUT_HANDLE = -11
+
+
+class _COORD(ctypes.Structure):
+    _fields_ = [("X", wintypes.SHORT), ("Y", wintypes.SHORT)]
+
+
+class _SMALL_RECT(ctypes.Structure):
+    _fields_ = [
+        ("Left", wintypes.SHORT),
+        ("Top", wintypes.SHORT),
+        ("Right", wintypes.SHORT),
+        ("Bottom", wintypes.SHORT),
+    ]
+
+
+class _CONSOLE_SCREEN_BUFFER_INFO(ctypes.Structure):
+    _fields_ = [
+        ("dwSize", _COORD),
+        ("dwCursorPosition", _COORD),
+        ("wAttributes", wintypes.WORD),
+        ("srWindow", _SMALL_RECT),
+        ("dwMaximumWindowSize", _COORD),
+    ]
+
+
+class _CHAR_INFO(ctypes.Structure):
+    _fields_ = [("Char", _CHAR_UNION), ("Attributes", wintypes.WORD)]
+
+
+kernel32.GetConsoleScreenBufferInfo.argtypes = [
+    wintypes.HANDLE,
+    ctypes.POINTER(_CONSOLE_SCREEN_BUFFER_INFO),
+]
+kernel32.GetConsoleScreenBufferInfo.restype = wintypes.BOOL
+
+kernel32.ReadConsoleOutputW.argtypes = [
+    wintypes.HANDLE,
+    ctypes.POINTER(_CHAR_INFO),
+    _COORD,
+    _COORD,
+    ctypes.POINTER(_SMALL_RECT),
+]
+kernel32.ReadConsoleOutputW.restype = wintypes.BOOL
+
+
+def get_activity_checker(pid_holder):
+    """Return a callable that detects agent activity by hashing the console buffer.
+
+    pid_holder: not used for screen hashing, but kept for signature compatibility.
+    """
+    last_hash = [None]
+    handle = kernel32.GetStdHandle(STD_OUTPUT_HANDLE)
+
+    def check():
+        # Get buffer dimensions
+        csbi = _CONSOLE_SCREEN_BUFFER_INFO()
+        if not kernel32.GetConsoleScreenBufferInfo(handle, ctypes.byref(csbi)):
+            return False
+
+        # We only hash the visible window area to save time/memory
+        rect = csbi.srWindow
+        width = rect.Right - rect.Left + 1
+        height = rect.Bottom - rect.Top + 1
+        if width <= 0 or height <= 0:
+            return False
+
+        # Allocate buffer for CHAR_INFO
+        buffer_size = _COORD(width, height)
+        buffer_coord = _COORD(0, 0)
+        read_rect = _SMALL_RECT(rect.Left, rect.Top, rect.Right, rect.Bottom)
+        char_info_array = (_CHAR_INFO * (width * height))()
+
+        ok = kernel32.ReadConsoleOutputW(
+            handle,
+            char_info_array,
+            buffer_size,
+            buffer_coord,
+            ctypes.byref(read_rect),
+        )
+        if not ok:
+            return False
+
+        # Hash the raw bytes of the character info array
+        current_hash = hash(bytes(char_info_array))
+        changed = last_hash[0] is not None and current_hash != last_hash[0]
+        last_hash[0] = current_hash
+        return changed
+
+    return check
+
+
+
+def run_agent(command, extra_args, cwd, env, queue_file, agent, no_restart, start_watcher, strip_env=None, pid_holder=None, headless=False):
     """Run agent as a direct subprocess, inject via Win32 console."""
     start_watcher(inject)
 
     while True:
         try:
             proc = subprocess.Popen([command] + extra_args, cwd=cwd, env=env)
+            if pid_holder is not None:
+                pid_holder[0] = proc.pid
             proc.wait()
+            if pid_holder is not None:
+                pid_holder[0] = None
 
             if no_restart:
                 break
