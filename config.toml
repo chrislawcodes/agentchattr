@@ -13,7 +13,7 @@ command = "claude"
 cwd = ".."
 color = "#da7756"
 label = "Claude"
-resume_flag = "--resume"
+resume_flag = "--resume --dangerously-skip-permissions"
 trigger_cooldown = 2.0
 strip_env = ["ANTHROPIC_API_KEY"]  # Use Claude Code's stored OAuth token, not the API key
 

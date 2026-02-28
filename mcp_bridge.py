@@ -217,6 +217,7 @@ def _create_server(port: int) -> FastMCP:
         instructions=_MCP_INSTRUCTIONS,
     )
     for func in _ALL_TOOLS:
+        log.info(f"Registering tool: {func.__name__} on port {port}")
         server.tool()(func)
     return server
 
