@@ -25,7 +25,7 @@ See [WORKFLOW.md](WORKFLOW.md) for the full process.
 ---
 
 ### Session resume on restart
-- **Owner:** Review - codex (implemented by gemini-cli, PR open on feature/session-resume)
+- **Owner:** Done
 - **Scope:** `wrapper.py` — use each agent's `resume_flag` from config to resume the previous session on restart instead of starting cold
 - **Acceptance criteria:** Restarting `start_gemini.sh` resumes the last Gemini session; same for Claude and Codex
 - **Test plan:** Unit test that `run_agent` constructs the correct resume command; manual smoke test
@@ -52,7 +52,7 @@ See [WORKFLOW.md](WORKFLOW.md) for the full process.
 ---
 
 ### "Working" indicator in chat UI
-- **Owner:** Review - claude (implemented by gemini-cli)
+- **Owner:** Done
 - **Scope:** Show a `…` or "active" status next to an agent's name in the chat UI while they are processing a task
 - **Acceptance criteria:** Agent status pill shows activity when processing; returns to normal when idle
 - **Test plan:** Manual UI test; unit test for backend status endpoint if applicable
@@ -61,7 +61,7 @@ See [WORKFLOW.md](WORKFLOW.md) for the full process.
 ---
 
 ### ngrok secret token auth
-- **Owner:** Pending - codex (after PR reviews)
+- **Owner:** Done
 - **Scope:** `app.py` — read `ACCESS_TOKEN` env var; reject requests missing `?token=<value>` when set; no change to local-only usage
 - **Acceptance criteria:** Setting `ACCESS_TOKEN=xyz ngrok http 8300` and opening `https://xxx.ngrok.io?token=xyz` works; without token param returns 403
 - **Test plan:** Unit test middleware; manual test via ngrok URL
@@ -79,7 +79,7 @@ See [WORKFLOW.md](WORKFLOW.md) for the full process.
 ---
 
 ### Kanban task sidebar
-- **Owner:** Review - claude (implemented by gemini-cli, PR open #6)
+- **Owner:** Done
 - **Scope:** Backend `/api/tasks` endpoint parses `TODO.md` → returns tasks as JSON; frontend collapsible sidebar in `static/` shows kanban columns (Pending / In Progress / Review / Done) with auto-refresh every 30s
 - **Acceptance criteria:** Sidebar visible in chat UI; cards update when TODO.md changes; works on mobile viewport
 - **Test plan:** Unit test TODO.md parser; manual UI test
@@ -120,6 +120,15 @@ See [WORKFLOW.md](WORKFLOW.md) for the full process.
 - **Acceptance criteria:** Dead sessions are cleaned up automatically; active sessions are untouched
 - **Test plan:** Unit test session detection logic with mocked tmux output
 - **Branch:** feature/tmux-session-cleanup
+
+---
+
+### Agent task monitor
+- **Owner:** Done
+- **Scope:** `wrapper.py` — add background thread to auto-reinject `chat - use mcp` if queue is non-empty but agent is idle for >5 min
+- **Acceptance criteria:** Agents that get stuck on a prompt are automatically reminded to check the chat
+- **Test plan:** Unit test monitor logic; manual verification
+- **Branch:** feature/agent-task-monitor
 
 ---
 
