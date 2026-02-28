@@ -922,6 +922,24 @@ const SLASH_COMMANDS = [
 let slashMenuIndex = 0;
 let slashMenuVisible = false;
 
+let mentionMenuIndex = 0;
+let mentionMenuVisible = false;
+let currentMentionMatch = null; // { query, start }
+
+function getMentionQuery(text, pos) {
+    const lastAt = text.lastIndexOf('@', pos - 1);
+    if (lastAt === -1) return null;
+
+    // Ensure it's either at start or preceded by a space
+    if (lastAt > 0 && text[lastAt - 1] !== ' ') return null;
+
+    const query = text.substring(lastAt + 1, pos);
+    // If it contains a space or newline, it's not a mention anymore
+    if (/[ \n]/.test(query)) return null;
+
+    return { query, start: lastAt };
+}
+
 function updateSlashMenu(text) {
     const menu = document.getElementById('slash-menu');
     if (!text.startsWith('/') || text.includes(' ') && !text.startsWith('/poetry')) {
@@ -969,37 +987,125 @@ function selectSlashCommand(cmd) {
     slashMenuVisible = false;
 }
 
+function updateMentionMenu() {
+    const input = document.getElementById('input');
+    const text = input.value;
+    const pos = input.selectionStart;
+    const menu = document.getElementById('slash-menu');
+
+    const match = getMentionQuery(text, pos);
+    if (!match) {
+        if (mentionMenuVisible) {
+            menu.classList.add('hidden');
+            mentionMenuVisible = false;
+        }
+        return;
+    }
+
+    const query = match.query.toLowerCase();
+    const agents = Object.keys(agentConfig);
+    const matches = agents.filter(name => 
+        name.startsWith(query) || (agentConfig[name].label || '').toLowerCase().startsWith(query)
+    );
+
+    if (matches.length === 0) {
+        menu.classList.add('hidden');
+        mentionMenuVisible = false;
+        return;
+    }
+
+    currentMentionMatch = match;
+    menu.innerHTML = '';
+    mentionMenuIndex = Math.min(mentionMenuIndex, matches.length - 1);
+
+    matches.forEach((name, i) => {
+        const cfg = agentConfig[name];
+        const row = document.createElement('div');
+        row.className = 'slash-item' + (i === mentionMenuIndex ? ' active' : '');
+        row.dataset.name = name;
+        row.innerHTML = `<span class="slash-cmd" style="color: ${cfg.color}">@${escapeHtml(cfg.label || name)}</span>`;
+        row.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            selectMention(name);
+        });
+        row.addEventListener('mouseenter', () => {
+            mentionMenuIndex = i;
+            menu.querySelectorAll('.slash-item').forEach((el, j) => el.classList.toggle('active', j === i));
+        });
+        menu.appendChild(row);
+    });
+
+    menu.classList.remove('hidden');
+    mentionMenuVisible = true;
+}
+
+function selectMention(name) {
+    const input = document.getElementById('input');
+    const text = input.value;
+    const before = text.substring(0, currentMentionMatch.start);
+    const after = text.substring(input.selectionStart);
+
+    input.value = before + '@' + name + ' ' + after;
+    input.focus();
+    // Set cursor after the inserted mention
+    const newPos = before.length + name.length + 2;
+    input.setSelectionRange(newPos, newPos);
+
+    document.getElementById('slash-menu').classList.add('hidden');
+    mentionMenuVisible = false;
+
+    // Trigger input event to resize
+    input.dispatchEvent(new Event('input'));
+}
+
 // --- Input ---
 
 function setupInput() {
     const input = document.getElementById('input');
 
     input.addEventListener('keydown', (e) => {
-        if (slashMenuVisible) {
+        const menuVisible = slashMenuVisible || mentionMenuVisible;
+        if (menuVisible) {
             const menu = document.getElementById('slash-menu');
             const items = menu.querySelectorAll('.slash-item');
             if (e.key === 'ArrowUp') {
                 e.preventDefault();
-                slashMenuIndex = (slashMenuIndex - 1 + items.length) % items.length;
-                items.forEach((el, i) => el.classList.toggle('active', i === slashMenuIndex));
+                if (slashMenuVisible) {
+                    slashMenuIndex = (slashMenuIndex - 1 + items.length) % items.length;
+                    items.forEach((el, i) => el.classList.toggle('active', i === slashMenuIndex));
+                } else {
+                    mentionMenuIndex = (mentionMenuIndex - 1 + items.length) % items.length;
+                    items.forEach((el, i) => el.classList.toggle('active', i === mentionMenuIndex));
+                }
                 return;
             }
             if (e.key === 'ArrowDown') {
                 e.preventDefault();
-                slashMenuIndex = (slashMenuIndex + 1) % items.length;
-                items.forEach((el, i) => el.classList.toggle('active', i === slashMenuIndex));
+                if (slashMenuVisible) {
+                    slashMenuIndex = (slashMenuIndex + 1) % items.length;
+                    items.forEach((el, i) => el.classList.toggle('active', i === slashMenuIndex));
+                } else {
+                    mentionMenuIndex = (mentionMenuIndex + 1) % items.length;
+                    items.forEach((el, i) => el.classList.toggle('active', i === mentionMenuIndex));
+                }
                 return;
             }
             if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
                 e.preventDefault();
-                const active = items[slashMenuIndex];
-                if (active) selectSlashCommand(active.querySelector('.slash-cmd').textContent);
+                if (slashMenuVisible) {
+                    const active = items[slashMenuIndex];
+                    if (active) selectSlashCommand(active.querySelector('.slash-cmd').textContent);
+                } else {
+                    const active = items[mentionMenuIndex];
+                    if (active) selectMention(active.dataset.name);
+                }
                 if (e.key === 'Enter') sendMessage();
                 return;
             }
             if (e.key === 'Escape') {
                 menu.classList.add('hidden');
                 slashMenuVisible = false;
+                mentionMenuVisible = false;
                 return;
             }
         }
@@ -1009,11 +1115,24 @@ function setupInput() {
         }
     });
 
-    // Auto-resize + slash menu
+    // Auto-resize + menus
     input.addEventListener('input', () => {
         input.style.height = 'auto';
         input.style.height = Math.min(input.scrollHeight, 120) + 'px';
-        updateSlashMenu(input.value);
+        
+        if (input.value.startsWith('/')) {
+            updateSlashMenu(input.value);
+            if (mentionMenuVisible) {
+                document.getElementById('slash-menu').classList.add('hidden');
+                mentionMenuVisible = false;
+            }
+        } else {
+            updateMentionMenu();
+            if (slashMenuVisible) {
+                document.getElementById('slash-menu').classList.add('hidden');
+                slashMenuVisible = false;
+            }
+        }
     });
 }
 

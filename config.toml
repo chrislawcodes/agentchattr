@@ -44,7 +44,7 @@ sse_port = 8201
 
 [cleanup]
 enabled = true
-idle_timeout_minutes = 10
+idle_timeout_minutes = 60
 check_interval_seconds = 60
 
 [images]

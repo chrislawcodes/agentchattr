@@ -162,9 +162,9 @@ def chat_join(name: str, project: str = "") -> str:
     return f"Joined. Online: {', '.join(online)}"
 
 
-def chat_who(project: str = "") -> str:
+def chat_who() -> str:
     """Check who's currently online in agentchattr."""
-    log.info(f"chat_who: called, project={project}")
+    log.info("chat_who: called")
     online = _get_online()
     return f"Online: {', '.join(online)}" if online else "Nobody online."
 
@@ -237,4 +237,18 @@ def run_http_server():
 def run_sse_server():
     """Block — run SSE MCP in a background thread."""
     mcp_sse.run(transport="sse")
+
+
+if __name__ == "__main__":
+    # Run as a stdio server for local testing/cli use
+    from projects import ProjectManager
+    from pathlib import Path
+    
+    # Use default data dir
+    data_dir = "./data"
+    project_manager = ProjectManager(data_dir)
+    store = project_manager.get_store()
+    
+    server = _create_server(0)  # port doesn't matter for stdio
+    server.run(transport="stdio")
 
