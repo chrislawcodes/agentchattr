@@ -1,7 +1,8 @@
-"""Tests for MessageStore reactions."""
+"""Tests for MessageStore reactions and durability."""
 
 import sys
 from pathlib import Path
+from unittest.mock import patch, MagicMock
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
@@ -18,6 +19,23 @@ def test_toggle_reaction_adds_and_removes_sender(tmp_path):
 
     reactions = store.toggle_reaction(msg["id"], "👍", "alice")
     assert reactions == {}
+
+
+def test_add_calls_fsync(tmp_path):
+    """store.add() must call os.fsync to ensure durability on crash."""
+    store = MessageStore(str(tmp_path / "chat.jsonl"))
+    with patch("os.fsync") as mock_fsync:
+        store.add("user", "hello")
+    mock_fsync.assert_called_once()
+
+
+def test_delete_calls_fsync(tmp_path):
+    """store.delete() rewrites the JSONL file and must call os.fsync."""
+    store = MessageStore(str(tmp_path / "chat.jsonl"))
+    msg = store.add("user", "to be deleted")
+    with patch("os.fsync") as mock_fsync:
+        store.delete([msg["id"]])
+    mock_fsync.assert_called_once()
 
 
 def test_get_recent_includes_reactions(tmp_path):

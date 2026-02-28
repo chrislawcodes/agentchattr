@@ -36,15 +36,16 @@ trigger_cooldown = 4.0
 [routing]
 # "none" = only route on explicit @mention. "all" = route to all agents by default.
 default = "none"
-max_agent_hops = 4
+max_agent_hops = 999
 
 [mcp]
 http_port = 8200
 sse_port = 8201
+activity_timeout_seconds = 120
 
 [cleanup]
-enabled = true
-idle_timeout_minutes = 10
+enabled = false
+idle_timeout_minutes = 60
 check_interval_seconds = 60
 
 [images]

@@ -15,13 +15,22 @@ from pathlib import Path
 ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT))
 
+_TOKEN_FILE = ROOT / "data" / "session_token.txt"
+
 
 def _stable_session_token() -> str:
     """Derive a stable session token from Claude Code's API key (macOS keychain).
 
     Hashes the key with SHA-256 so the raw API key is never stored or transmitted.
-    Falls back to a fresh random token if the key can't be read.
+    Falls back to a persisted random token so browser tabs survive server restarts.
     """
+    # Return persisted token if available (survives restarts without keychain)
+    if _TOKEN_FILE.exists():
+        saved = _TOKEN_FILE.read_text("utf-8").strip()
+        if saved:
+            return saved
+
+    token = None
     try:
         result = subprocess.run(
             ["security", "find-generic-password", "-s", "Claude Code", "-w"],
@@ -29,10 +38,16 @@ def _stable_session_token() -> str:
         )
         api_key = result.stdout.strip()
         if api_key:
-            return hashlib.sha256(api_key.encode()).hexdigest()
+            token = hashlib.sha256(api_key.encode()).hexdigest()
     except Exception:
         pass
-    return secrets.token_hex(32)
+
+    if token is None:
+        token = secrets.token_hex(32)
+
+    _TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _TOKEN_FILE.write_text(token, "utf-8")
+    return token
 
 
 def main():
@@ -53,6 +68,11 @@ def main():
     # --- Security: derive a stable session token from Claude Code's API key ---
     session_token = _stable_session_token()
 
+    # Record server start time so agent wrappers can detect restarts
+    data_dir = ROOT / config.get("server", {}).get("data_dir", "./data")
+    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / "server_started_at.txt").write_text(str(time.time()), "utf-8")
+
     # Configure the FastAPI app (creates shared store)
     from app import app, configure, set_event_loop
     configure(config, session_token=session_token)
@@ -61,6 +81,13 @@ def main():
     from app import store
     import mcp_bridge
     mcp_bridge.store = store
+
+    # Apply configurable activity timeout
+    mcp_bridge.ACTIVITY_TIMEOUT = config.get("mcp", {}).get("activity_timeout_seconds", 120)
+
+    # Enable cursor persistence across restarts
+    mcp_bridge._CURSORS_FILE = data_dir / "mcp_cursors.json"
+    mcp_bridge._load_cursors()
 
     # Start MCP servers in background threads
     http_port = config.get("mcp", {}).get("http_port", 8200)

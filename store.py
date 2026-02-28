@@ -1,6 +1,7 @@
 """JSONL message persistence for the chat room with observer callbacks."""
 
 import json
+import os
 import time
 import threading
 from pathlib import Path
@@ -59,6 +60,8 @@ class MessageStore:
             self._messages.append(msg)
             with open(self._path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
             result = self._with_reactions(msg)
 
         # Fire callbacks outside the lock
@@ -137,6 +140,8 @@ class MessageStore:
         with open(self._path, "w", encoding="utf-8") as f:
             for m in self._messages:
                 f.write(json.dumps(m, ensure_ascii=False) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
 
     def clear(self):
         """Wipe all messages and truncate the log file."""

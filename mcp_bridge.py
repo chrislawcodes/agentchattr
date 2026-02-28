@@ -9,6 +9,7 @@ import json
 import time
 import logging
 import threading
+from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
@@ -24,7 +25,10 @@ _activity_lock = threading.Lock()
 _cursors: dict[str, int] = {}  # project:agent → last seen message id
 _cursors_lock = threading.Lock()
 PRESENCE_TIMEOUT = 300
-ACTIVITY_TIMEOUT = 30  # Agents are "busy" for 30s after their last tool call
+ACTIVITY_TIMEOUT = 120  # Agents are "busy" for 120s after their last tool call
+
+# Cursor persistence — set by run.py to enable saving cursors across restarts
+_CURSORS_FILE: Path | None = None
 
 _MCP_INSTRUCTIONS = (
     "agentchattr — a shared chat channel for coordinating development between AI agents and humans. "
@@ -91,12 +95,42 @@ def _serialize_messages(msgs: list[dict]) -> str:
     return json.dumps(out, indent=2, ensure_ascii=False) if out else "No new messages."
 
 
+def _load_cursors():
+    """Load cursor state from disk (called by run.py after store init)."""
+    global _cursors
+    if _CURSORS_FILE is None or not _CURSORS_FILE.exists():
+        return
+    try:
+        data = json.loads(_CURSORS_FILE.read_text("utf-8"))
+        with _cursors_lock:
+            _cursors.update({str(k): int(v) for k, v in data.items()})
+    except Exception:
+        log.warning("Failed to load cursor state from %s", _CURSORS_FILE)
+
+
+def _save_cursors():
+    """Persist cursor state to disk atomically (write temp + rename)."""
+    if _CURSORS_FILE is None:
+        return
+    try:
+        with _cursors_lock:
+            snapshot = dict(_cursors)
+        _CURSORS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _CURSORS_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(snapshot), "utf-8")
+        import os as _os
+        _os.replace(tmp, _CURSORS_FILE)  # atomic on POSIX
+    except Exception:
+        log.warning("Failed to save cursor state to %s", _CURSORS_FILE)
+
+
 def _update_cursor(sender: str, msgs: list[dict]):
     if sender and msgs:
         proj = project_manager.current_project if project_manager else "default"
         key = f"{proj}:{sender}"
         with _cursors_lock:
             _cursors[key] = msgs[-1]["id"]
+        _save_cursors()
 
 
 def chat_read(sender: str = "", since_id: int = 0, limit: int = 20, project: str = "") -> str:
@@ -162,11 +196,16 @@ def chat_join(name: str, project: str = "") -> str:
     return f"Joined. Online: {', '.join(online)}"
 
 
-def chat_who(project: str = "") -> str:
+def chat_who() -> str:
     """Check who's currently online in agentchattr."""
-    log.info(f"chat_who: called, project={project}")
+    log.info("chat_who: called")
     online = _get_online()
     return f"Online: {', '.join(online)}" if online else "Nobody online."
+
+
+def chat_ping() -> str:
+    """Lightweight liveness check with no side effects."""
+    return "pong"
 
 
 def _get_online() -> list[str]:
@@ -204,7 +243,7 @@ def is_busy(name: str) -> bool:
 # --- Server instances ---
 
 _ALL_TOOLS = [
-    chat_send, chat_read, chat_resync, chat_join, chat_who,
+    chat_send, chat_read, chat_resync, chat_join, chat_who, chat_ping,
 ]
 
 
@@ -238,3 +277,16 @@ def run_sse_server():
     """Block — run SSE MCP in a background thread."""
     mcp_sse.run(transport="sse")
 
+
+if __name__ == "__main__":
+    # Run as a stdio server for local testing/cli use
+    from projects import ProjectManager
+    from pathlib import Path
+    
+    # Use default data dir
+    data_dir = "./data"
+    project_manager = ProjectManager(data_dir)
+    store = project_manager.get_store()
+    
+    server = _create_server(0)  # port doesn't matter for stdio
+    server.run(transport="stdio")

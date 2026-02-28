@@ -132,6 +132,15 @@ See [WORKFLOW.md](WORKFLOW.md) for the full process.
 
 ---
 
+### Agent mention autocomplete
+- **Owner:** Done
+- **Scope:** In `static/chat.js`, show a dropdown of available agents when the user types `@`. Selecting one autocompletes the mention.
+- **Acceptance criteria:** Dropdown shows matching agents; keyboard navigation works; selecting inserts `@name ` and hides menu.
+- **Test plan:** Manual UI test
+- **Branch:** feature/agent-mention-autocomplete
+
+---
+
 ### Projects — multi-context workspaces
 - **Owner:** Review - claude (implemented by gemini-cli)
 - **Scope:** Add a "Projects" concept so agents and the user can switch between separate working contexts (e.g., "agentchattr", "Valuerank coding", "Valuerank vignette analysis"). Each project has its own chat history, task list, and agent assignments.

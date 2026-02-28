@@ -42,7 +42,10 @@ class SessionCleanup:
         self._enabled = self._cleanup_cfg.get("enabled", False)
         self._timeout = self._cleanup_cfg.get("idle_timeout_minutes", 10) * 60
         self._interval = self._cleanup_cfg.get("check_interval_seconds", 60)
-        self._last_online: dict[str, float] = {}  # agent_name -> last_seen_timestamp
+        _now = time.time()
+        self._last_online: dict[str, float] = {
+            agent: _now for agent in config.get("agents", {})
+        }
 
     def start(self):
         if not self._enabled:

@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import re as _re
 import sys
 import threading
 import uuid
@@ -265,8 +266,10 @@ def configure(cfg: dict, session_token: str = ""):
             _time.sleep(3)
             try:
                 for flag in _data_dir.glob("*_recovered"):
-                    agent_name = flag.read_text("utf-8").strip()
-                    flag.unlink()
+                    consumed = flag.with_suffix(".consumed")
+                    os.replace(flag, consumed)  # atomic on POSIX
+                    agent_name = consumed.read_text("utf-8").strip()
+                    consumed.unlink()
                     store.add(
                         "system",
                         f"Agent routing for {agent_name} interrupted — auto-recovered. "
@@ -599,7 +602,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 if "max_agent_hops" in new:
                     try:
                         hops = int(new["max_agent_hops"])
-                        hops = max(1, min(hops, 50))
+                        hops = max(1, min(hops, 999))
                         room_settings["max_agent_hops"] = hops
                         router.max_hops = hops
                     except (ValueError, TypeError):
