@@ -16,11 +16,12 @@ log = logging.getLogger(__name__)
 
 # Shared state — set by run.py before starting
 store = None
+project_manager = None
 _presence: dict[str, float] = {}
 _presence_lock = threading.Lock()
 _activity: dict[str, float] = {}  # agent_name → last activity timestamp
 _activity_lock = threading.Lock()
-_cursors: dict[str, int] = {}  # agent_name → last seen message id
+_cursors: dict[str, int] = {}  # project:agent → last seen message id
 _cursors_lock = threading.Lock()
 PRESENCE_TIMEOUT = 300
 ACTIVITY_TIMEOUT = 30  # Agents are "busy" for 30s after their last tool call
@@ -43,6 +44,8 @@ def chat_send(sender: str, message: str, image_path: str = "", reply_to: int = -
     if not message.strip() and not image_path:
         return "Empty message, not sent."
 
+    current_store = store
+
     attachments = []
     if image_path:
         import shutil
@@ -60,10 +63,10 @@ def chat_send(sender: str, message: str, image_path: str = "", reply_to: int = -
         attachments.append({"name": src.name, "url": f"/uploads/{filename}"})
 
     reply_id = reply_to if reply_to >= 0 else None
-    if reply_id is not None and store.get_by_id(reply_id) is None:
+    if reply_id is not None and current_store.get_by_id(reply_id) is None:
         return f"Message #{reply_to} not found."
 
-    msg = store.add(sender, message.strip(), attachments=attachments, reply_to=reply_id)
+    msg = current_store.add(sender, message.strip(), attachments=attachments, reply_to=reply_id)
     _record_activity(sender)
     return f"Sent (id={msg['id']})"
 
@@ -89,8 +92,10 @@ def _serialize_messages(msgs: list[dict]) -> str:
 
 def _update_cursor(sender: str, msgs: list[dict]):
     if sender and msgs:
+        proj = project_manager.current_project if project_manager else "default"
+        key = f"{proj}:{sender}"
         with _cursors_lock:
-            _cursors[sender] = msgs[-1]["id"]
+            _cursors[key] = msgs[-1]["id"]
 
 
 def chat_read(sender: str = "", since_id: int = 0, limit: int = 20) -> str:
@@ -101,18 +106,23 @@ def chat_read(sender: str = "", since_id: int = 0, limit: int = 20) -> str:
     - Subsequent calls with same sender: returns only NEW messages since last read.
     - Pass since_id to override and read from a specific point.
     - Omit sender to always get the last `limit` messages (no cursor)."""
-    log.info(f"chat_read: sender={sender}, since_id={since_id}, limit={limit}")
+    log.info(f"chat_read: sender={sender}, since_id={since_id}")
+    
+    current_store = store
+
     if since_id:
-        msgs = store.get_since(since_id)
+        msgs = current_store.get_since(since_id)
     elif sender:
+        proj = project_manager.current_project if project_manager else "default"
+        key = f"{proj}:{sender}"
         with _cursors_lock:
-            cursor = _cursors.get(sender, 0)
+            cursor = _cursors.get(key, 0)
         if cursor:
-            msgs = store.get_since(cursor)
+            msgs = current_store.get_since(cursor)
         else:
-            msgs = store.get_recent(limit)
+            msgs = current_store.get_recent(limit)
     else:
-        msgs = store.get_recent(limit)
+        msgs = current_store.get_recent(limit)
 
     msgs = msgs[-limit:]
     _update_cursor(sender, msgs)
@@ -129,7 +139,9 @@ def chat_resync(sender: str, limit: int = 50) -> str:
     log.info(f"chat_resync: sender={sender}, limit={limit}")
     if not sender.strip():
         return "Error: sender is required for chat_resync."
-    msgs = store.get_recent(limit)
+    
+    current_store = store
+    msgs = current_store.get_recent(limit)
     _update_cursor(sender, msgs)
     _record_activity(sender)
     return _serialize_messages(msgs)
@@ -138,9 +150,10 @@ def chat_resync(sender: str, limit: int = 50) -> str:
 def chat_join(name: str) -> str:
     """Announce that you've connected to agentchattr."""
     log.info(f"chat_join: name={name}")
+    current_store = store
     with _presence_lock:
         _presence[name] = time.time()
-    store.add(name, f"{name} connected", msg_type="join")
+    current_store.add(name, f"{name} connected", msg_type="join")
     online = _get_online()
     return f"Joined. Online: {', '.join(online)}"
 

@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from store import MessageStore
+from projects import ProjectManager
 from router import Router
 from agents import AgentTrigger
 from tmux_cleanup import SessionCleanup
@@ -24,6 +25,7 @@ log = logging.getLogger(__name__)
 app = FastAPI(title="agentchattr")
 
 # --- globals (set by configure()) ---
+project_manager: ProjectManager | None = None
 store: MessageStore | None = None
 router: Router | None = None
 agents: AgentTrigger | None = None
@@ -170,9 +172,12 @@ def _install_security_middleware(token: str, cfg: dict, ngrok_token: str = ""):
         async def dispatch(self, request: Request, call_next):
             path = request.url.path
 
-            # Static assets and uploads remain public so the browser can load them
-            # normally after the initial authorized page request.
-            if path.startswith(("/static/", "/uploads/")):
+            # Static assets, uploads, the root page, and MCP endpoints are
+            # exempt from session-token gating. MCP has its own session
+            # management; blocking /mcp initialization prevents agents from
+            # connecting at all.
+            if (path in ("/", "/favicon.ico")
+                    or path.startswith(("/static/", "/uploads/", "/mcp", "/sse"))):
                 return await call_next(request)
 
             if not _access_token_valid(
@@ -210,7 +215,7 @@ def _install_security_middleware(token: str, cfg: dict, ngrok_token: str = ""):
 
 
 def configure(cfg: dict, session_token: str = ""):
-    global store, router, agents, config
+    global project_manager, store, router, agents, config
     config = cfg
 
     # --- Security: store the session token and install middleware ---
@@ -219,13 +224,13 @@ def configure(cfg: dict, session_token: str = ""):
     data_dir = cfg.get("server", {}).get("data_dir", "./data")
     Path(data_dir).mkdir(parents=True, exist_ok=True)
 
-    log_path = Path(data_dir) / "agentchattr_log.jsonl"
-    legacy_log_path = Path(data_dir) / "room_log.jsonl"
-    if not log_path.exists() and legacy_log_path.exists():
-        # Backward compatibility for existing installs.
-        log_path = legacy_log_path
+    project_manager = ProjectManager(data_dir)
+    store = project_manager.get_store()
 
-    store = MessageStore(str(log_path))
+    # Bridge: expose store and project_manager to MCP
+    import mcp_bridge
+    mcp_bridge.store = store
+    mcp_bridge.project_manager = project_manager
 
     max_hops = cfg.get("routing", {}).get("max_agent_hops", 4)
 
@@ -626,6 +631,36 @@ async def upload_image(file: UploadFile = File(...)):
         "name": file.filename,
         "url": f"/uploads/{filename}",
     })
+
+
+@app.get("/api/projects")
+async def list_projects():
+    return {
+        "current": project_manager.current_project,
+        "all": project_manager.list_projects()
+    }
+
+
+@app.post("/api/projects")
+async def switch_project(body: dict):
+    name = body.get("name")
+    if not name:
+        return JSONResponse({"error": "project name required"}, status_code=400)
+    
+    global store
+    store = project_manager.switch_project(name)
+    
+    # Update MCP bridge
+    import mcp_bridge
+    mcp_bridge.store = store
+    
+    # Re-register callback
+    store.on_message(_on_store_message)
+    
+    # Notify all clients to reload
+    await broadcast({"type": "project_switched", "name": name})
+    
+    return {"ok": True, "name": name}
 
 
 @app.get("/api/messages")

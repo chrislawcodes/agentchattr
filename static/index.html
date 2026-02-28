@@ -12,7 +12,10 @@
         <header>
             <div class="header-left">
                 <img src="/static/logo.png" alt="agentchattr" class="header-logo">
-                <h1 id="room-title">agentchattr</h1>
+                <div class="header-title-group">
+                    <h1 id="room-title">agentchattr</h1>
+                    <select id="project-selector" onchange="onProjectSwitch()"></select>
+                </div>
                 <span class="subtitle" id="room-subtitle"></span>
             </div>
             <div class="header-right">

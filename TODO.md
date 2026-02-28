@@ -133,9 +133,9 @@ See [WORKFLOW.md](WORKFLOW.md) for the full process.
 ---
 
 ### Projects — multi-context workspaces
-- **Owner:** Pending (needs design discussion first)
+- **Owner:** Review - claude (implemented by gemini-cli)
 - **Scope:** Add a "Projects" concept so agents and the user can switch between separate working contexts (e.g., "agentchattr", "Valuerank coding", "Valuerank vignette analysis"). Each project has its own chat history, task list, and agent assignments.
 - **Acceptance criteria:** User can create/switch projects from the UI; chat history and tasks are scoped per project; agents know which project context they are in
 - **Test plan:** Manual UI test across at least 2 projects; verify history isolation; unit test project switching logic
 - **Branch:** feature/projects
-- **Note:** Needs architecture design before implementation — data model, config format, agent awareness
+- **Note:** Implementation complete: project-scoped data dirs, switcher UI, and MCP project support.

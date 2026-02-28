@@ -73,6 +73,31 @@ header {
     gap: 10px;
 }
 
+.header-title-group {
+    display: flex;
+    flex-direction: column;
+}
+
+#project-selector {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: 11px;
+    outline: none;
+    cursor: pointer;
+    margin-top: -2px;
+}
+
+#project-selector:hover {
+    color: var(--text);
+}
+
+#project-selector option {
+    background: var(--bg-header);
+    color: var(--text);
+}
+
 .header-logo {
     width: 24px;
     height: 24px;

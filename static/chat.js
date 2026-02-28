@@ -138,6 +138,7 @@ function init() {
     setupKeyboardShortcuts();
     startStatusPolling();
     startTaskPolling();
+    loadProjects();
 }
 
 let statusPollingTimer = null;
@@ -235,6 +236,76 @@ function addCodeCopyButtons(container) {
     }
 }
 
+// --- Project Management ---
+
+async function loadProjects() {
+    try {
+        const resp = await fetch('/api/projects', { headers: { 'X-Session-Token': SESSION_TOKEN } });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        
+        const selector = document.getElementById('project-selector');
+        if (!selector) return;
+        
+        let html = '';
+        // Add "New Project..." option
+        html += `<option value="__new__">+ New Project...</option>`;
+        
+        for (const p of data.all) {
+            html += `<option value="${p}" ${p === data.current ? 'selected' : ''}>${p}</option>`;
+        }
+        selector.innerHTML = html;
+    } catch (err) {
+        console.error("Failed to load projects:", err);
+    }
+}
+
+async function onProjectSwitch() {
+    const selector = document.getElementById('project-selector');
+    let name = selector.value;
+    
+    if (name === '__new__') {
+        name = prompt("Enter new project name:");
+        if (!name) {
+            loadProjects(); // reset
+            return;
+        }
+        name = name.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+    }
+    
+    try {
+        const resp = await fetch('/api/projects', {
+            method: 'POST',
+            headers: { 
+                'X-Session-Token': SESSION_TOKEN,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ name })
+        });
+        if (resp.ok) {
+            // Server will broadcast 'project_switched', which triggers reload
+        }
+    } catch (err) {
+        console.error("Failed to switch project:", err);
+    }
+}
+
+function handleProjectSwitched(name) {
+    // Clear everything and reload
+    document.getElementById('messages').innerHTML = '';
+    lastMessageDate = null;
+    unreadCount = 0;
+    mentions = {};
+    todos = {};
+    updateMentionsBadge();
+    
+    // Refresh UI components
+    loadProjects();
+    if (!document.getElementById('task-panel').classList.contains('hidden')) {
+        renderTaskBoard();
+    }
+}
+
 // --- WebSocket ---
 
 function connectWebSocket() {
@@ -257,6 +328,8 @@ function connectWebSocket() {
                 playNotificationSound(event.data.sender);
             }
             appendMessage(event.data);
+        } else if (event.type === 'project_switched') {
+            handleProjectSwitched(event.name);
         } else if (event.type === 'agents') {
             applyAgentConfig(event.data);
         } else if (event.type === 'todos') {
