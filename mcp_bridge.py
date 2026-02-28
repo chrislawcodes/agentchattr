@@ -36,15 +36,16 @@ _MCP_INSTRUCTIONS = (
 # --- Tool implementations (shared between both servers) ---
 
 
-def chat_send(sender: str, message: str, image_path: str = "", reply_to: int = -1) -> str:
+def chat_send(sender: str, message: str, image_path: str = "", reply_to: int = -1, project: str = "") -> str:
     """Send a message to the agentchattr chat. Use your name as sender (claude/codex/ben).
     Optionally attach a local image by providing image_path (absolute path).
-    Optionally reply to a message by providing reply_to (message ID)."""
-    log.info(f"chat_send: sender={sender}, message={message}, image_path={image_path}, reply_to={reply_to}")
+    Optionally reply to a message by providing reply_to (message ID).
+    Optionally specify a project name (defaults to current)."""
+    log.info(f"chat_send: sender={sender}, message={message}, project={project}")
     if not message.strip() and not image_path:
         return "Empty message, not sent."
 
-    current_store = store
+    current_store = project_manager.get_store(project) if project_manager else store
 
     attachments = []
     if image_path:
@@ -98,22 +99,23 @@ def _update_cursor(sender: str, msgs: list[dict]):
             _cursors[key] = msgs[-1]["id"]
 
 
-def chat_read(sender: str = "", since_id: int = 0, limit: int = 20) -> str:
+def chat_read(sender: str = "", since_id: int = 0, limit: int = 20, project: str = "") -> str:
     """Read chat messages. Returns JSON array with: id, sender, text, type, time.
 
     Smart defaults:
     - First call with sender: returns last `limit` messages (full context).
     - Subsequent calls with same sender: returns only NEW messages since last read.
     - Pass since_id to override and read from a specific point.
-    - Omit sender to always get the last `limit` messages (no cursor)."""
-    log.info(f"chat_read: sender={sender}, since_id={since_id}")
+    - Omit sender to always get the last `limit` messages (no cursor).
+    - Optionally specify a project name."""
+    log.info(f"chat_read: sender={sender}, since_id={since_id}, project={project}")
     
-    current_store = store
+    current_store = project_manager.get_store(project) if project_manager else store
+    proj = project or (project_manager.current_project if project_manager else "default")
 
     if since_id:
         msgs = current_store.get_since(since_id)
     elif sender:
-        proj = project_manager.current_project if project_manager else "default"
         key = f"{proj}:{sender}"
         with _cursors_lock:
             cursor = _cursors.get(key, 0)
@@ -130,27 +132,29 @@ def chat_read(sender: str = "", since_id: int = 0, limit: int = 20) -> str:
     return _serialize_messages(msgs)
 
 
-def chat_resync(sender: str, limit: int = 50) -> str:
+def chat_resync(sender: str, limit: int = 50, project: str = "") -> str:
     """Explicit full-context fetch.
 
     Returns the latest `limit` messages and resets the sender cursor
     to the latest returned message id.
     """
-    log.info(f"chat_resync: sender={sender}, limit={limit}")
+    log.info(f"chat_resync: sender={sender}, limit={limit}, project={project}")
     if not sender.strip():
         return "Error: sender is required for chat_resync."
     
-    current_store = store
+    current_store = project_manager.get_store(project) if project_manager else store
+    proj = project or (project_manager.current_project if project_manager else "default")
+
     msgs = current_store.get_recent(limit)
     _update_cursor(sender, msgs)
     _record_activity(sender)
     return _serialize_messages(msgs)
 
 
-def chat_join(name: str) -> str:
+def chat_join(name: str, project: str = "") -> str:
     """Announce that you've connected to agentchattr."""
-    log.info(f"chat_join: name={name}")
-    current_store = store
+    log.info(f"chat_join: name={name}, project={project}")
+    current_store = project_manager.get_store(project) if project_manager else store
     with _presence_lock:
         _presence[name] = time.time()
     current_store.add(name, f"{name} connected", msg_type="join")
@@ -158,9 +162,9 @@ def chat_join(name: str) -> str:
     return f"Joined. Online: {', '.join(online)}"
 
 
-def chat_who() -> str:
+def chat_who(project: str = "") -> str:
     """Check who's currently online in agentchattr."""
-    log.info("chat_who: called")
+    log.info(f"chat_who: called, project={project}")
     online = _get_online()
     return f"Online: {', '.join(online)}" if online else "Nobody online."
 
