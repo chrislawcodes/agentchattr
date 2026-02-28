@@ -25,7 +25,7 @@ _activity_lock = threading.Lock()
 _cursors: dict[str, int] = {}  # project:agent → last seen message id
 _cursors_lock = threading.Lock()
 PRESENCE_TIMEOUT = 300
-ACTIVITY_TIMEOUT = 120  # Agents are "busy" for 120s after their last tool call
+ACTIVITY_TIMEOUT = 300  # Align busy state with presence heartbeat/health watcher windows
 
 # Cursor persistence — set by run.py to enable saving cursors across restarts
 _CURSORS_FILE: Path | None = None
