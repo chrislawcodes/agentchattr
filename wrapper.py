@@ -16,6 +16,7 @@ How it works:
 """
 
 import json
+import logging
 import os
 import shutil
 import sys
@@ -25,6 +26,7 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).parent
+log = logging.getLogger(__name__)
 
 SERVER_NAME = "agentchattr"
 
@@ -128,8 +130,8 @@ def _queue_watcher(queue_file: Path, agent_name: str, inject_fn):
                     # Small delay to let the TUI settle
                     time.sleep(0.5)
                     inject_fn(f"mcp read #{channel} and if addressed respond in the chat")
-        except Exception:
-            pass  # Silently continue — monitor will restart if thread dies
+        except Exception as e:
+            log.exception("queue watcher error (agent=%s): %s", agent_name, e)
 
         time.sleep(1)
 

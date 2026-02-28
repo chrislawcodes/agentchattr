@@ -11,11 +11,14 @@ How it works:
   4. Ctrl+B, D to detach (agent keeps running in background)
 """
 
+import logging
 import shlex
 import shutil
 import subprocess
 import sys
 import time
+
+log = logging.getLogger(__name__)
 
 
 def _check_tmux():
@@ -30,18 +33,25 @@ def _check_tmux():
     sys.exit(1)
 
 
-def inject(text: str, *, tmux_session: str):
+def inject(text: str, *, tmux_session: str) -> bool:
     """Send text + Enter to a tmux session via send-keys."""
     # Use -l to send text literally (avoids misinterpreting as key names),
     # then send Enter as a separate key press
-    subprocess.run(
+    r = subprocess.run(
         ["tmux", "send-keys", "-t", tmux_session, "-l", text],
         capture_output=True,
     )
-    subprocess.run(
+    if r.returncode != 0:
+        log.warning("tmux inject failed for session %s (text send, exit %d)", tmux_session, r.returncode)
+        return False
+    r = subprocess.run(
         ["tmux", "send-keys", "-t", tmux_session, "Enter"],
         capture_output=True,
     )
+    if r.returncode != 0:
+        log.warning("tmux inject failed for session %s (Enter, exit %d)", tmux_session, r.returncode)
+        return False
+    return True
 
 
 def get_activity_checker(session_name):
@@ -85,7 +95,8 @@ def run_agent(command, extra_args, cwd, env, queue_file, agent, no_restart, star
     abs_cwd = str(Path(cwd).resolve())
 
     # Wire up injection with the tmux session name
-    inject_fn = lambda text: inject(text, tmux_session=session_name)
+    def inject_fn(text) -> bool:
+        return inject(text, tmux_session=session_name)
     start_watcher(inject_fn)
 
     print(f"  Using tmux session: {session_name}")
