@@ -173,7 +173,7 @@ def get_activity_checker(pid_holder):
 
 
 
-def run_agent(command, extra_args, cwd, env, queue_file, agent, no_restart, start_watcher, strip_env=None, pid_holder=None, headless=False):
+def run_agent(command, extra_args, cwd, env, queue_file, agent, no_restart, start_watcher, strip_env=None, pid_holder=None, headless=False, on_session_started=None):
     """Run agent as a direct subprocess, inject via Win32 console."""
     start_watcher(inject)
 
@@ -182,6 +182,8 @@ def run_agent(command, extra_args, cwd, env, queue_file, agent, no_restart, star
             proc = subprocess.Popen([command] + extra_args, cwd=cwd, env=env)
             if pid_holder is not None:
                 pid_holder[0] = proc.pid
+            if on_session_started:
+                on_session_started()
             proc.wait()
             if pid_holder is not None:
                 pid_holder[0] = None

@@ -86,7 +86,7 @@ def get_activity_checker(session_name):
     return check
 
 
-def run_agent(command, extra_args, cwd, env, queue_file, agent, no_restart, start_watcher, strip_env=None, pid_holder=None, headless=False):
+def run_agent(command, extra_args, cwd, env, queue_file, agent, no_restart, start_watcher, strip_env=None, pid_holder=None, headless=False, on_session_started=None):
     """Run agent inside a tmux session, inject via tmux send-keys."""
     _check_tmux()
 
@@ -134,6 +134,9 @@ def run_agent(command, extra_args, cwd, env, queue_file, agent, no_restart, star
             if result.returncode != 0:
                 print(f"  Error: failed to create tmux session (exit {result.returncode})")
                 break
+
+            if on_session_started:
+                on_session_started()
 
             if not headless:
                 # Attach — blocks until agent exits or user detaches (Ctrl+B, D)
