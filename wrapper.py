@@ -195,18 +195,18 @@ def _kill_tmux_session(tmux_session: str):
     subprocess.run(["tmux", "kill-session", "-t", tmux_session], capture_output=True)
 
 
-def _check_mcp_health(mcp_url: str) -> bool:
-    """Return True when the local MCP HTTP endpoint responds to chat_ping."""
+def _call_mcp_tool(mcp_url: str, tool_name: str, arguments: dict | None = None) -> tuple[bool, str]:
+    """Call a local MCP tool over HTTP and return success plus response body."""
     import urllib.error
     import urllib.request
 
     payload = json.dumps({
         "jsonrpc": "2.0",
-        "id": "health-check",
+        "id": f"{tool_name}-call",
         "method": "tools/call",
         "params": {
-            "name": "chat_ping",
-            "arguments": {},
+            "name": tool_name,
+            "arguments": arguments or {},
         },
     }).encode("utf-8")
     req = urllib.request.Request(
@@ -218,13 +218,28 @@ def _check_mcp_health(mcp_url: str) -> bool:
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             body = resp.read().decode("utf-8", "replace")
-            return 200 <= resp.status < 300 and "pong" in body
+            return 200 <= resp.status < 300, body
     except urllib.error.HTTPError as e:
-        log.warning("MCP health check failed with HTTP %s", e.code)
-        return False
+        log.warning("MCP tool %s failed with HTTP %s", tool_name, e.code)
+        return False, ""
     except Exception as e:
-        log.warning("MCP health check failed: %s", e)
-        return False
+        log.warning("MCP tool %s failed: %s", tool_name, e)
+        return False, ""
+
+
+def _check_mcp_health(mcp_url: str) -> bool:
+    """Return True when the local MCP HTTP endpoint responds to chat_ping."""
+    ok, body = _call_mcp_tool(mcp_url, "chat_ping")
+    return ok and "pong" in body
+
+
+def _announce_join(mcp_url: str, agent_name: str):
+    """Emit chat_join after the agent session starts so presence resets immediately."""
+    ok, body = _call_mcp_tool(mcp_url, "chat_join", {"name": agent_name})
+    if not ok:
+        log.warning("Failed to announce chat_join for %s", agent_name)
+    elif "Joined." not in body:
+        log.warning("Unexpected chat_join response for %s: %s", agent_name, body)
 
 
 # ---------------------------------------------------------------------------
@@ -290,6 +305,17 @@ def _watch_mcp_health(mcp_url: str, tmux_session: str, stop_event: threading.Eve
 
         if stop_event.wait(300):
             break
+
+
+def _watch_mcp_heartbeat(mcp_url: str, agent_name: str, stop_event: threading.Event):
+    """Periodically refresh agent presence via chat_join to prevent SSE staling."""
+    while not stop_event.is_set():
+        # Wait first to avoid double-join at startup
+        if stop_event.wait(60):
+            break
+        
+        log.debug("Sending periodic heartbeat for %s", agent_name)
+        _announce_join(mcp_url, agent_name)
 
 
 # ---------------------------------------------------------------------------
@@ -411,6 +437,20 @@ def main():
     )
     health_watcher.start()
 
+    heartbeat_watcher = threading.Thread(
+        target=_watch_mcp_heartbeat,
+        args=(mcp_http_url, agent, _stop_event),
+        daemon=True,
+    )
+    heartbeat_watcher.start()
+
+    def on_session_started():
+        threading.Thread(
+            target=_announce_join,
+            args=(mcp_http_url, agent),
+            daemon=True,
+        ).start()
+
     # Dispatch to platform-specific runner
     if sys.platform == "win32":
         from wrapper_windows import run_agent
@@ -427,6 +467,7 @@ def main():
         no_restart=args.no_restart,
         start_watcher=start_watcher,
         strip_env=list(strip_vars),
+        on_session_started=on_session_started,
     )
 
     print("  Wrapper stopped.")
