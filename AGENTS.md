@@ -87,6 +87,45 @@ python -m pytest tests/ -q
 
 ---
 
+## Token usage
+
+### Target: Claude <50% of total output tokens
+As of 2026-02-28: Claude 64.6%, Codex 23.2%, Gemini 12.2% — Claude over budget.
+Goal: shift more implementation, review, and chat volume to Gemini and Codex.
+
+**How to measure** (run from `/Users/chrislaw/agentchattr`):
+```bash
+python3 - <<'EOF'
+import json
+from pathlib import Path
+
+data = Path("data/agentchattr_log.jsonl")
+counts, chars = {}, {}
+for line in data.read_text().splitlines():
+    try:
+        m = json.loads(line)
+        s, t = m.get("sender",""), m.get("text","")
+        counts[s] = counts.get(s,0) + 1
+        chars[s] = chars.get(s,0) + len(t)
+    except: pass
+
+agents = ["claude","codex","gemini"]
+total = sum(chars.get(a,0) for a in agents)
+print(f"{'Agent':<10} {'Msgs':>6} {'~Tokens':>8} {'Share':>7}")
+for a in agents:
+    c = chars.get(a,0)
+    print(f"{a:<10} {counts.get(a,0):>6} {c//4:>8} {c/total*100:>6.1f}%")
+EOF
+```
+
+### How to keep Claude's share down
+- Claude coordinates and reviews — does NOT implement features
+- Gemini and Codex post detailed progress updates in chat (not just "DONE")
+- Cross-agent review: Gemini reviews Codex's diff, Codex reviews Gemini's diff
+- Claude's chat messages should be brief: task assignment + go/no-go decisions only
+
+---
+
 ## PR workflow
 
 ### Review cycle
