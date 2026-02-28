@@ -44,7 +44,7 @@ sse_port = 8201
 activity_timeout_seconds = 120
 
 [cleanup]
-enabled = true
+enabled = false
 idle_timeout_minutes = 60
 check_interval_seconds = 60
 
