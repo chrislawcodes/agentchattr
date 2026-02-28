@@ -11,11 +11,14 @@ How it works:
   4. Ctrl+B, D to detach (agent keeps running in background)
 """
 
+import logging
 import shlex
 import shutil
 import subprocess
 import sys
 import time
+
+log = logging.getLogger(__name__)
 
 
 def _check_tmux():
@@ -30,8 +33,11 @@ def _check_tmux():
     sys.exit(1)
 
 
-def inject(text: str, *, tmux_session: str):
-    """Send text + Enter to a tmux session via send-keys."""
+def inject(text: str, *, tmux_session: str) -> bool:
+    """Send text + Enter to a tmux session via send-keys.
+
+    Returns True on success, False if the tmux session is dead or unreachable.
+    """
     # 1. Clear any pending/stacked input.
     # C-u clears the line in most shells; Escape dismisses popups in TUIs.
     subprocess.run(["tmux", "send-keys", "-t", tmux_session, "C-u"], capture_output=True)
@@ -39,17 +45,25 @@ def inject(text: str, *, tmux_session: str):
     time.sleep(0.15)
 
     # 2. Type the command literally.
-    subprocess.run(
+    r = subprocess.run(
         ["tmux", "send-keys", "-t", tmux_session, "-l", text],
         capture_output=True,
     )
+    if r.returncode != 0:
+        log.warning("tmux inject failed for session %s (text send, exit %d)", tmux_session, r.returncode)
+        return False
     time.sleep(0.15)
 
     # 3. Submit.
-    subprocess.run(
+    r = subprocess.run(
         ["tmux", "send-keys", "-t", tmux_session, "Enter"],
         capture_output=True,
     )
+    if r.returncode != 0:
+        log.warning("tmux inject failed for session %s (Enter, exit %d)", tmux_session, r.returncode)
+        return False
+
+    return True
 
 
 def run_agent(command, extra_args, cwd, env, queue_file, agent, no_restart, start_watcher, strip_env=None):

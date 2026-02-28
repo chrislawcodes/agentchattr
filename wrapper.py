@@ -16,8 +16,10 @@ How it works:
 """
 
 import json
+import logging
 import os
 import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -25,6 +27,7 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).parent
+log = logging.getLogger(__name__)
 
 SERVER_NAME = "agentchattr"
 DEFAULT_TRIGGER_COOLDOWN_SECONDS = 2.0
@@ -159,8 +162,8 @@ def _queue_watcher(queue_file: Path, agent_name: str, inject_fn, agent_cfg: dict
                     time.sleep(0.5)
                     inject_fn("chat - use mcp")
                     state.record_inject()
-        except Exception:
-            pass  # Silently continue — monitor will restart if thread dies
+        except Exception as e:
+            log.exception("queue watcher error (agent=%s): %s", agent_name, e)
 
         time.sleep(1)
 
@@ -180,6 +183,44 @@ def _task_monitor(queue_file: Path, inject_fn, state: MonitorState, timeout_minu
                     state.record_inject()
         except Exception:
             pass
+
+
+# ---------------------------------------------------------------------------
+# Server restart watcher — kills the tmux session when the server restarts
+# so the agent reconnects with a fresh MCP session instead of using stale IDs
+# ---------------------------------------------------------------------------
+
+def _watch_for_server_restart(data_dir: Path, tmux_session: str, stop_event: threading.Event):
+    """Detect server restarts and kill the tmux session so the agent reconnects.
+
+    Waits one extra cycle after detecting a change to confirm the server is
+    stable before restarting — avoids killing agents during server mid-boot.
+    """
+    started_at_file = data_dir / "server_started_at.txt"
+    known_start = started_at_file.read_text().strip() if started_at_file.exists() else ""
+    pending_restart = False
+
+    while not stop_event.is_set():
+        stop_event.wait(30)
+        if stop_event.is_set():
+            break
+        if not started_at_file.exists():
+            pending_restart = False
+            continue
+        current = started_at_file.read_text().strip()
+        if current != known_start:
+            if pending_restart:
+                # Second consecutive cycle with new timestamp — server is stable, restart
+                log.info("Server restart confirmed — restarting tmux session %s", tmux_session)
+                subprocess.run(["tmux", "send-keys", "-t", tmux_session, "C-c"], capture_output=True)
+                known_start = current
+                pending_restart = False
+            else:
+                # First detection — wait one more cycle to confirm
+                log.info("Server restart detected for %s — confirming next cycle", tmux_session)
+                pending_restart = True
+        else:
+            pending_restart = False
 
 
 # ---------------------------------------------------------------------------
@@ -282,6 +323,17 @@ def main():
 
     monitor = threading.Thread(target=_watcher_monitor, daemon=True)
     monitor.start()
+
+    # Start server restart watcher — kills tmux session on server restart
+    # so the agent process reconnects with a fresh MCP session
+    _stop_event = threading.Event()
+    tmux_session = f"agentchattr-{agent}"
+    server_watcher = threading.Thread(
+        target=_watch_for_server_restart,
+        args=(data_dir, tmux_session, _stop_event),
+        daemon=True,
+    )
+    server_watcher.start()
 
     # Dispatch to platform-specific runner
     if sys.platform == "win32":

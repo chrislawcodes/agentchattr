@@ -41,6 +41,7 @@ max_agent_hops = 4
 [mcp]
 http_port = 8200
 sse_port = 8201
+activity_timeout_seconds = 120
 
 [cleanup]
 enabled = true

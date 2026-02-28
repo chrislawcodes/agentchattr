@@ -265,8 +265,10 @@ def configure(cfg: dict, session_token: str = ""):
             _time.sleep(3)
             try:
                 for flag in _data_dir.glob("*_recovered"):
-                    agent_name = flag.read_text("utf-8").strip()
-                    flag.unlink()
+                    consumed = flag.with_suffix(".consumed")
+                    os.replace(flag, consumed)  # atomic on POSIX
+                    agent_name = consumed.read_text("utf-8").strip()
+                    consumed.unlink()
                     store.add(
                         "system",
                         f"Agent routing for {agent_name} interrupted — auto-recovered. "

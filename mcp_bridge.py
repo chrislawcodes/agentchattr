@@ -9,6 +9,7 @@ import json
 import time
 import logging
 import threading
+from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
@@ -24,7 +25,10 @@ _activity_lock = threading.Lock()
 _cursors: dict[str, int] = {}  # project:agent → last seen message id
 _cursors_lock = threading.Lock()
 PRESENCE_TIMEOUT = 300
-ACTIVITY_TIMEOUT = 30  # Agents are "busy" for 30s after their last tool call
+ACTIVITY_TIMEOUT = 120  # Agents are "busy" for 120s after their last tool call
+
+# Cursor persistence — set by run.py to enable saving cursors across restarts
+_CURSORS_FILE: Path | None = None
 
 _MCP_INSTRUCTIONS = (
     "agentchattr — a shared chat channel for coordinating development between AI agents and humans. "
@@ -91,12 +95,39 @@ def _serialize_messages(msgs: list[dict]) -> str:
     return json.dumps(out, indent=2, ensure_ascii=False) if out else "No new messages."
 
 
+def _load_cursors():
+    """Load cursor state from disk (called by run.py after store init)."""
+    global _cursors
+    if _CURSORS_FILE is None or not _CURSORS_FILE.exists():
+        return
+    try:
+        data = json.loads(_CURSORS_FILE.read_text("utf-8"))
+        with _cursors_lock:
+            _cursors.update({str(k): int(v) for k, v in data.items()})
+    except Exception:
+        log.warning("Failed to load cursor state from %s", _CURSORS_FILE)
+
+
+def _save_cursors():
+    """Persist cursor state to disk."""
+    if _CURSORS_FILE is None:
+        return
+    try:
+        with _cursors_lock:
+            snapshot = dict(_cursors)
+        _CURSORS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _CURSORS_FILE.write_text(json.dumps(snapshot), "utf-8")
+    except Exception:
+        log.warning("Failed to save cursor state to %s", _CURSORS_FILE)
+
+
 def _update_cursor(sender: str, msgs: list[dict]):
     if sender and msgs:
         proj = project_manager.current_project if project_manager else "default"
         key = f"{proj}:{sender}"
         with _cursors_lock:
             _cursors[key] = msgs[-1]["id"]
+        _save_cursors()
 
 
 def chat_read(sender: str = "", since_id: int = 0, limit: int = 20, project: str = "") -> str:
