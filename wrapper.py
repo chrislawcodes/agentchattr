@@ -233,6 +233,17 @@ def _check_mcp_health(mcp_url: str) -> bool:
     return ok and "pong" in body
 
 
+def _check_sse_health(sse_url: str) -> bool:
+    """Return True when the SSE endpoint returns 200 OK (checked via GET)."""
+    import urllib.request
+    try:
+        req = urllib.request.Request(sse_url, method="GET")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
+
 def _announce_join(mcp_url: str, agent_name: str):
     """Emit chat_join after the agent session starts so presence resets immediately."""
     ok, body = _call_mcp_tool(mcp_url, "chat_join", {"name": agent_name})
@@ -280,8 +291,11 @@ def _watch_for_server_restart(data_dir: Path, tmux_session: str, stop_event: thr
             pending_restart = False
 
 
-def _watch_mcp_health(mcp_url: str, tmux_session: str, stop_event: threading.Event):
-    """Restart the tmux session after repeated MCP health check failures."""
+def _watch_mcp_health(mcp_url: str, tmux_session: str, stop_event: threading.Event, sse_url: str = None):
+    """Restart the tmux session after repeated MCP health check failures.
+    
+    If sse_url is provided, performs a fast (30s) probe of the SSE transport.
+    """
     failures = 0
 
     # Grace period so the local MCP server can finish booting before checks start.
@@ -289,6 +303,18 @@ def _watch_mcp_health(mcp_url: str, tmux_session: str, stop_event: threading.Eve
         return
 
     while not stop_event.is_set():
+        # 1. Fast SSE probe (if applicable)
+        if sse_url:
+            if not _check_sse_health(sse_url):
+                log.warning("MCP SSE transport failed for %s — restarting immediately", tmux_session)
+                _kill_tmux_session(tmux_session)
+                # After restart, wait for recovery before next check
+                if stop_event.wait(60):
+                    break
+                failures = 0
+                continue
+
+        # 2. Regular HTTP tool-call probe
         healthy = _check_mcp_health(mcp_url)
         if healthy:
             failures = 0
@@ -303,7 +329,9 @@ def _watch_mcp_health(mcp_url: str, tmux_session: str, stop_event: threading.Eve
                 _kill_tmux_session(tmux_session)
                 failures = 0
 
-        if stop_event.wait(300):
+        # Poll interval: 30s if we have an SSE transport to monitor, else 5m
+        interval = 30 if sse_url else 300
+        if stop_event.wait(interval):
             break
 
 
@@ -424,6 +452,12 @@ def main():
     _stop_event = threading.Event()
     tmux_session = f"agentchattr-{agent}"
     mcp_http_url = f"http://127.0.0.1:{mcp_cfg.get('http_port', 8200)}/mcp"
+    
+    # Detect if this agent uses SSE (currently only gemini)
+    mcp_sse_url = None
+    if agent == "gemini":
+        mcp_sse_url = f"http://127.0.0.1:{mcp_cfg.get('sse_port', 8201)}/sse"
+
     server_watcher = threading.Thread(
         target=_watch_for_server_restart,
         args=(data_dir, tmux_session, _stop_event),
@@ -432,7 +466,7 @@ def main():
     server_watcher.start()
     health_watcher = threading.Thread(
         target=_watch_mcp_health,
-        args=(mcp_http_url, tmux_session, _stop_event),
+        args=(mcp_http_url, tmux_session, _stop_event, mcp_sse_url),
         daemon=True,
     )
     health_watcher.start()

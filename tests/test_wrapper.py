@@ -354,3 +354,30 @@ def test_watch_for_server_restart_triggers_on_change(tmp_path):
     kill_calls = [c for c in mock_run.call_args_list if "kill-session" in str(c[0][0])]
     assert len(kill_calls) == 1, f"Expected 1 kill-session call, got {len(kill_calls)}"
     assert "test-session" in kill_calls[0][0][0]
+
+
+def test_watch_mcp_health_kills_immediately_on_sse_failure():
+    """If sse_url is provided, a single probe failure should trigger an immediate kill."""
+    from wrapper import _watch_mcp_health
+    
+    stop_event = MagicMock()
+    # is_set() is checked at loop start. Return False, then True to exit after one check.
+    stop_event.is_set.side_effect = [False, True]
+    
+    # wait() is called for grace period (60s) AND at end of loop.
+    # Return False for grace period, then True for loop end.
+    stop_event.wait.side_effect = [False, True]
+
+    with patch("wrapper._check_sse_health", return_value=False) as mock_check, \
+         patch("wrapper._kill_tmux_session") as mock_kill, \
+         patch("wrapper._check_mcp_health", return_value=True):
+        
+        _watch_mcp_health(
+            mcp_url="http://127.0.0.1:8200/mcp",
+            tmux_session="test-session",
+            stop_event=stop_event,
+            sse_url="http://127.0.0.1:8201/sse"
+        )
+        
+    mock_check.assert_called_once()
+    mock_kill.assert_called_once_with("test-session")
