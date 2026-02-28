@@ -137,6 +137,40 @@ def test_queue_watcher_drains_queue_after_trigger(tmp_path):
     assert queue_file.read_text() == "", "Queue file should be empty after processing"
 
 
+def test_queue_watcher_skips_truncated_line_and_logs_warning(tmp_path):
+    """A truncated queue line should be warned about and ignored without blocking valid entries."""
+    from wrapper import _queue_watcher, MonitorState
+
+    queue_file = tmp_path / "test_queue.jsonl"
+    inject_fn = MagicMock()
+    state = MonitorState()
+
+    queue_file.write_text(
+        '{"sender": "user", "text": "first", "time": "00:00:00"}\n'
+        '{"sender": "user", "text": "truncated"\n'
+        '{"sender": "user", "text": "second", "time": "00:00:01"}\n'
+    )
+
+    call_count = 0
+
+    def fake_sleep(n):
+        nonlocal call_count
+        call_count += 1
+        if call_count >= 2:
+            raise SystemExit
+
+    with patch("wrapper.log.warning") as mock_warning, \
+         patch("time.sleep", side_effect=fake_sleep):
+        with pytest.raises(SystemExit):
+            _queue_watcher(queue_file, "codex", inject_fn, {}, state)
+
+    inject_fn.assert_called_once_with("chat - use mcp")
+    mock_warning.assert_called_once()
+    assert "Skipping malformed queue entry for %s: %r" in mock_warning.call_args[0][0]
+    assert mock_warning.call_args[0][1] == "codex"
+    assert "truncated" in mock_warning.call_args[0][2]
+
+
 # ---------------------------------------------------------------------------
 # run_agent command construction
 # ---------------------------------------------------------------------------

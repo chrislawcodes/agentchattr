@@ -148,7 +148,7 @@ def _queue_watcher(queue_file: Path, agent_name: str, inject_fn, agent_cfg: dict
                         json.loads(line)
                         has_trigger = True
                     except json.JSONDecodeError:
-                        pass
+                        log.warning("Skipping malformed queue entry for %s: %r", agent_name, line)
 
                 if has_trigger:
                     # Debounce wake-ups so slower TUIs (notably Gemini CLI)
