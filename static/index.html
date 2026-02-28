@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>agentchattr</title>
-    <link rel="stylesheet" href="/static/style.css?v=27">
+    <link rel="stylesheet" href="/static/style.css?v=28">
     <link rel="icon" href="/static/favicon.ico">
 </head>
 <body>
@@ -45,10 +45,6 @@
                 <input type="text" id="setting-username" placeholder="your name" maxlength="20">
             </div>
             <div class="settings-field">
-                <label for="setting-title">Room</label>
-                <input type="text" id="setting-title" placeholder="agentchattr" maxlength="60">
-            </div>
-            <div class="settings-field">
                 <label for="setting-font">Font</label>
                 <select id="setting-font">
                     <option value="mono">Monospace</option>
@@ -60,18 +56,27 @@
                 <input type="number" id="setting-hops" min="1" max="50" value="4" title="Max agent-to-agent hops before pausing">
             </div>
             <div class="settings-field">
-                <label>History limit</label>
-                <div class="history-limit-row">
-                    <label class="history-all-label"><input type="checkbox" id="setting-history-all"> all</label>
-                    <input type="number" id="setting-history" min="1" max="9999" placeholder="50" title="Messages to load per channel">
-                </div>
+                <label for="setting-history">History</label>
+                <select id="setting-history">
+                    <option value="all">All</option>
+                    <option value="25">25</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                    <option value="200">200</option>
+                    <option value="500">500</option>
+                </select>
+            </div>
+            <div class="settings-field">
+                <label for="setting-contrast">Contrast</label>
+                <select id="setting-contrast">
+                    <option value="normal">Normal</option>
+                    <option value="high">High</option>
+                </select>
             </div>
             <div class="settings-divider"></div>
             <div class="settings-field">
-                <label>Sounds</label>
                 <div id="sound-settings"></div>
             </div>
-            <button class="settings-save" onclick="saveSettings()">Save</button>
             <span class="settings-spacer"></span>
             <button class="settings-danger" onclick="clearChat()">Clear Chat</button>
         </div>
@@ -79,7 +84,6 @@
         <div id="pins-panel" class="hidden">
             <div class="pins-header">
                 <span>Pinned</span>
-                <button onclick="togglePinsPanel()" class="pins-close">&times;</button>
             </div>
             <div id="pins-list"></div>
         </div>
@@ -104,11 +108,7 @@
                 <div class="decisions-grip" id="decisions-grip"></div>
                 <div class="decisions-header">
                     <span>Decisions</span>
-                    <span class="decisions-info" data-tooltip="Lightweight project memory. Agents read these to stay aligned and can propose new ones for you to approve. Click a status pill to toggle.">
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/><circle cx="8" cy="5.5" r="0.8" fill="currentColor"/><path d="M8 7.5v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-                    </span>
                     <span class="decisions-counter" id="decisions-counter"></span>
-                    <button onclick="toggleDecisionsPanel()" class="decisions-close">&times;</button>
                 </div>
                 <div id="decisions-list"></div>
                 <div class="decisions-form">
@@ -149,14 +149,12 @@
         </footer>
     </div>
 
-    <div id="decisions-tooltip" class="hidden"></div>
-
     <div id="dropzone" class="hidden">
         <div class="dropzone-inner">Drop image here</div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="/static/chat.js?v=27"></script>
+    <script src="/static/chat.js?v=28"></script>
 </body>
 </html>
 

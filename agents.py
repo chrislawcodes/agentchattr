@@ -11,17 +11,6 @@ class AgentTrigger:
     def __init__(self, config: dict, data_dir: str = "./data"):
         self._config = config
         self._data_dir = Path(data_dir)
-        self._sessions_path = self._data_dir / "sessions.json"
-        self._sessions: dict[str, str] = {}
-        self._load_sessions()
-
-    def _load_sessions(self):
-        if self._sessions_path.exists():
-            try:
-                self._sessions = json.loads(
-                    self._sessions_path.read_text("utf-8"))
-            except Exception:
-                self._sessions = {}
 
     def is_available(self, name: str) -> bool:
         return name in self._config
@@ -30,9 +19,6 @@ class AgentTrigger:
         return False  # Worker handles busy state
 
     def get_status(self) -> dict:
-        # Reload sessions in case worker updated them
-        self._load_sessions()
-        # Check MCP presence to determine if agent is actually online
         from mcp_bridge import is_online
         return {
             name: {
@@ -40,7 +26,6 @@ class AgentTrigger:
                 "busy": False,
                 "label": cfg.get("label", name),
                 "color": cfg.get("color", "#888"),
-                "session_id": self._sessions.get(name),
             }
             for name, cfg in self._config.items()
         }

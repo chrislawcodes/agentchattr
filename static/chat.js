@@ -62,7 +62,7 @@ function buildSoundSettings() {
         row.className = 'sound-row';
         const label = document.createElement('span');
         label.className = 'sound-label';
-        label.textContent = name === 'default' ? 'Default' : (agentConfig[name]?.label || name);
+        label.textContent = name === 'default' ? 'Default Sound' : (agentConfig[name]?.label || name);
         const select = document.createElement('select');
         select.className = 'sound-select';
         select.dataset.agent = name;
@@ -127,6 +127,7 @@ function init() {
         gfm: true,         // GitHub-flavored markdown
     });
 
+    detectPlatform();
     connectWebSocket();
     setupInput();
     setupDragDrop();
@@ -177,15 +178,32 @@ function linkifyUrls(html) {
     });
 }
 
-function linkifyPaths(html) {
-    // Match Windows paths like E:\foo\bar or E:/foo/bar (not inside existing tags)
-    return html.replace(/(?<!["=\/])([A-Z]):[\\\/][\w\-.\\ \/]+/g, (match) => {
-        const escaped = match.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-        return `<a class="file-link" href="#" onclick="openInExplorer('${escaped}'); return false;" title="Open in Explorer">${match}</a>`;
-    });
+let serverPlatform = 'win32';  // default, updated on connect
+async function detectPlatform() {
+    try {
+        const r = await fetch('/api/platform', { headers: { 'X-Session-Token': SESSION_TOKEN } });
+        const data = await r.json();
+        serverPlatform = data.platform || 'win32';
+    } catch (e) { /* fallback to win32 */ }
 }
 
-async function openInExplorer(path) {
+function linkifyPaths(html) {
+    // Windows paths: E:\foo\bar or E:/foo/bar
+    html = html.replace(/(?<!["=\/])([A-Z]):[\\\/][\w\-.\\ \/]+/g, (match) => {
+        const escaped = match.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        return `<a class="file-link" href="#" onclick="openPath('${escaped}'); return false;" title="Open in file manager">${match}</a>`;
+    });
+    // Unix paths: /Users/..., /home/..., /tmp/..., /opt/..., /var/..., /etc/...
+    if (serverPlatform !== 'win32') {
+        html = html.replace(/(?<!["=\w])(\/(?:Users|home|tmp|opt|var|etc|usr)\/[\w\-.\/ ]+)/g, (match) => {
+            const escaped = match.replace(/'/g, "\\'");
+            return `<a class="file-link" href="#" onclick="openPath('${escaped}'); return false;" title="Open in file manager">${match}</a>`;
+        });
+    }
+    return html;
+}
+
+async function openPath(path) {
     try {
         await fetch('/api/open-path', {
             method: 'POST',
@@ -756,30 +774,6 @@ function updateStatus(data) {
         } else {
             pill.classList.add('offline');
         }
-
-        // Click to open session in terminal
-        if (info.session_id) {
-            pill.title = `Click to open ${name} session in terminal`;
-            pill.style.cursor = 'pointer';
-            pill.onclick = async () => {
-                const label = pill.querySelector('.status-label');
-                label.textContent = 'Opening...';
-                try {
-                    const resp = await fetch(`/api/open-session/${name}`, { method: 'POST', headers: { 'X-Session-Token': SESSION_TOKEN } });
-                    const result = await resp.json();
-                    if (resp.ok) {
-                        label.textContent = 'Opened!';
-                    } else {
-                        label.textContent = result.error || 'Error';
-                    }
-                } catch (err) {
-                    label.textContent = 'Error';
-                }
-                setTimeout(() => {
-                    label.textContent = info.label || name;
-                }, 2000);
-            };
-        }
     }
 }
 
@@ -802,7 +796,6 @@ function applySettings(data) {
     if (data.title) {
         document.getElementById('room-title').textContent = data.title;
         document.title = data.title;
-        document.getElementById('setting-title').value = data.title;
     }
     if (data.username) {
         username = data.username;
@@ -818,12 +811,11 @@ function applySettings(data) {
         document.getElementById('setting-hops').value = data.max_agent_hops;
     }
     if (data.history_limit !== undefined) {
-        const histAll = document.getElementById('setting-history-all');
-        const histNum = document.getElementById('setting-history');
-        const isAll = data.history_limit === 'all' || data.history_limit === '';
-        histAll.checked = isAll;
-        histNum.disabled = isAll;
-        histNum.value = isAll ? '' : data.history_limit;
+        document.getElementById('setting-history').value = String(data.history_limit);
+    }
+    if (data.contrast) {
+        document.body.classList.toggle('high-contrast', data.contrast === 'high');
+        document.getElementById('setting-contrast').value = data.contrast;
     }
     if (data.channels && Array.isArray(data.channels)) {
         channelList = data.channels;
@@ -846,6 +838,7 @@ function applySettings(data) {
 function toggleSettings() {
     const bar = document.getElementById('settings-bar');
     bar.classList.toggle('hidden');
+    document.getElementById('settings-toggle').classList.toggle('active', !bar.classList.contains('hidden'));
     if (!bar.classList.contains('hidden')) {
         document.getElementById('setting-username').focus();
     }
@@ -861,55 +854,58 @@ function clearChat() {
 
 function saveSettings() {
     const newUsername = document.getElementById('setting-username').value.trim();
-    const newTitle = document.getElementById('setting-title').value.trim();
     const newFont = document.getElementById('setting-font').value;
     const newHops = document.getElementById('setting-hops').value;
-    const histAll = document.getElementById('setting-history-all').checked;
-    const histNum = document.getElementById('setting-history').value.trim();
-    const newHistory = histAll ? 'all' : (parseInt(histNum) || 50);
+    const histVal = document.getElementById('setting-history').value;
+    const newHistory = histVal === 'all' ? 'all' : (parseInt(histVal) || 50);
+    const newContrast = document.getElementById('setting-contrast').value;
 
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({
             type: 'update_settings',
             data: {
                 username: newUsername || 'user',
-                title: newTitle || 'agentchattr',
                 font: newFont,
                 max_agent_hops: parseInt(newHops) || 4,
                 history_limit: newHistory,
+                contrast: newContrast,
             }
         }));
     }
-
-    document.getElementById('settings-bar').classList.add('hidden');
 }
 
 function setupSettingsKeys() {
-    // Save on Enter in settings fields
-    for (const id of ['setting-username', 'setting-title', 'setting-hops', 'setting-history']) {
-        document.getElementById(id).addEventListener('keydown', (e) => {
+    // Auto-save on blur/Enter for text/number fields
+    for (const id of ['setting-username', 'setting-hops']) {
+        const el = document.getElementById(id);
+        el.addEventListener('blur', () => saveSettings());
+        el.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
-                saveSettings();
+                el.blur();
             }
             if (e.key === 'Escape') {
-                document.getElementById('settings-bar').classList.add('hidden');
+                toggleSettings();
             }
         });
     }
-    // History "all" checkbox toggles number field
-    document.getElementById('setting-history-all').addEventListener('change', (e) => {
-        const numField = document.getElementById('setting-history');
-        numField.disabled = e.target.checked;
-        if (!e.target.checked) numField.focus();
-    });
 
-    // Also handle the select
-    document.getElementById('setting-font').addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-            document.getElementById('settings-bar').classList.add('hidden');
-        }
-    });
+    // Auto-save on change for selects, escape to close
+    for (const id of ['setting-font', 'setting-history', 'setting-contrast']) {
+        const el = document.getElementById(id);
+        el.addEventListener('change', () => {
+            // Apply contrast immediately (don't wait for server round-trip)
+            if (id === 'setting-contrast') {
+                document.body.classList.toggle('high-contrast', el.value === 'high');
+            }
+            saveSettings();
+        });
+        el.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                toggleSettings();
+            }
+        });
+    }
 }
 
 // --- Keyboard shortcuts ---
@@ -1254,7 +1250,7 @@ function renderReplyPreview() {
     }
     const truncated = replyingTo.text.length > 100 ? replyingTo.text.slice(0, 100) + '...' : replyingTo.text;
     const color = getColor(replyingTo.sender);
-    container.innerHTML = `<span class="reply-preview-label">replying to</span> <span style="color: ${color}; font-weight: 600">${escapeHtml(replyingTo.sender)}</span>: ${escapeHtml(truncated)} <button class="reply-cancel" onclick="cancelReply()">&times;</button>`;
+    container.innerHTML = `<span class="reply-preview-label">replying to</span> <span style="color: ${color}; font-weight: 600">${escapeHtml(replyingTo.sender)}</span>: ${escapeHtml(truncated)} <button class="dismiss-btn reply-cancel" onclick="cancelReply()">&times;</button>`;
 }
 
 function cancelReply() {
@@ -1367,7 +1363,7 @@ function enterDeleteMode(initialId) {
     // Show floating delete bar
     showDeleteBar();
     updateDeleteBar();
-    document.getElementById('scroll-anchor').style.bottom = '170px';
+    document.getElementById('scroll-anchor').style.bottom = '180px';
 }
 
 function toggleDeleteSelect(id, dragForceSelect) {
@@ -1397,7 +1393,7 @@ function showDeleteBar() {
         bar.id = 'delete-bar';
         bar.innerHTML = `<button class="delete-bar-cancel" onclick="exitDeleteMode()">Cancel</button><span class="delete-bar-count"></span><button class="delete-bar-confirm" onclick="confirmDelete()">Delete</button>`;
         const footer = document.querySelector('footer');
-        footer.insertBefore(bar, footer.firstChild);
+        footer.parentNode.insertBefore(bar, footer);
     }
     bar.classList.remove('hidden');
 }
@@ -1427,14 +1423,10 @@ function exitDeleteMode() {
     // Animate messages back
     document.getElementById('messages').classList.remove('delete-mode');
 
-    // Animate bar out
+    // Collapse bar
     const bar = document.getElementById('delete-bar');
     if (bar) {
-        bar.style.animation = 'delete-bar-out 0.2s ease-in forwards';
-        setTimeout(() => {
-            bar.classList.add('hidden');
-            bar.style.animation = '';
-        }, 200);
+        bar.classList.add('hidden');
     }
 
     // Fade out radios then remove
@@ -1444,7 +1436,7 @@ function exitDeleteMode() {
         setTimeout(() => el.remove(), 200);
     });
 
-    document.getElementById('scroll-anchor').style.bottom = '120px';
+    document.getElementById('scroll-anchor').style.bottom = '';
 }
 
 // Auto-scroll while dragging near edges
@@ -1498,6 +1490,7 @@ function handleDeleteBroadcast(ids) {
 function togglePinsPanel() {
     const panel = document.getElementById('pins-panel');
     panel.classList.toggle('hidden');
+    document.getElementById('pins-toggle').classList.toggle('active', !panel.classList.contains('hidden'));
     if (!panel.classList.contains('hidden')) {
         renderTodosPanel();
     }
@@ -1513,12 +1506,8 @@ function renderTodosPanel() {
         return;
     }
 
-    // Sort: open first, then done
-    const sorted = todoIds.map(Number).sort((a, b) => {
-        const sa = todos[a], sb = todos[b];
-        if (sa === sb) return a - b;
-        return sa === 'todo' ? -1 : 1;
-    });
+    // Chronological order (by message ID)
+    const sorted = todoIds.map(Number).sort((a, b) => a - b);
 
     for (const id of sorted) {
         const el = document.querySelector(`.message[data-id="${id}"]`);
@@ -1537,7 +1526,7 @@ function renderTodosPanel() {
         const checkClass = status === 'done' ? 'todo-check done' : 'todo-check';
         const msgChannel = el.dataset.channel || 'general';
 
-        item.innerHTML = `<button class="${checkClass}" onclick="todoToggle(${id})">${check}</button><span class="msg-time" style="color:var(--accent);font-weight:600;margin-right:4px">#${msgChannel}</span> <span class="msg-time">${escapeHtml(time)}</span> <span class="msg-sender" style="color: ${senderColor}">${escapeHtml(sender)}</span> <span class="msg-text">${escapeHtml(text)}</span><button class="todo-remove-btn" onclick="todoRemove(${id})" title="Remove from todos">&times;</button>`;
+        item.innerHTML = `<button class="${checkClass}" onclick="todoToggle(${id})">${check}</button><span class="msg-time" style="color:var(--accent);font-weight:600;margin-right:4px">#${msgChannel}</span> <span class="msg-time">${escapeHtml(time)}</span> <span class="msg-sender" style="color: ${senderColor}">${escapeHtml(sender)}</span> <span class="msg-text">${escapeHtml(text)}</span><button class="dismiss-btn danger" onclick="todoRemove(${id})" title="Remove from todos">&times;</button>`;
         item.addEventListener('click', (e) => {
             if (e.target.closest('button')) return;
             // Cross-channel pin: switch channel if needed
@@ -2081,21 +2070,6 @@ function setupDecisionForm() {
     setupCharCounter('decision-text', 'decision-text-counter');
     setupCharCounter('decision-reason', 'decision-reason-counter');
 
-    // Info tooltip — rendered as a fixed body-level element so it floats above everything
-    const infoIcon = document.querySelector('.decisions-info');
-    const tooltip = document.getElementById('decisions-tooltip');
-    if (infoIcon && tooltip) {
-        tooltip.textContent = infoIcon.getAttribute('data-tooltip');
-        infoIcon.addEventListener('mouseenter', () => {
-            const rect = infoIcon.getBoundingClientRect();
-            tooltip.style.top = (rect.top + rect.height / 2 - tooltip.offsetHeight / 2) + 'px';
-            tooltip.style.left = (rect.left - tooltip.offsetWidth - 8) + 'px';
-            tooltip.classList.remove('hidden');
-        });
-        infoIcon.addEventListener('mouseleave', () => {
-            tooltip.classList.add('hidden');
-        });
-    }
 }
 
 // --- Decisions ---
@@ -2116,6 +2090,7 @@ function handleDecisionEvent(action, decision) {
 function toggleDecisionsPanel() {
     const panel = document.getElementById('decisions-panel');
     panel.classList.toggle('hidden');
+    document.getElementById('decisions-toggle').classList.toggle('active', !panel.classList.contains('hidden'));
     if (!panel.classList.contains('hidden')) {
         renderDecisionsPanel();
     }
@@ -2130,8 +2105,12 @@ function renderDecisionsPanel() {
     const counter = document.getElementById('decisions-counter');
     if (counter) counter.textContent = `${decisions.length}/30`;
 
+    const hint = decisions.length < 3
+        ? '<div class="decisions-empty">Shared rules for agents.<br>They can propose them, or make your own below.<br>Try the debate button!</div>'
+        : '';
+
     if (decisions.length === 0) {
-        list.innerHTML = '<div class="decisions-empty">No decisions yet</div>';
+        list.innerHTML = hint;
         return;
     }
 
@@ -2173,6 +2152,8 @@ function renderDecisionsPanel() {
         `;
         list.appendChild(card);
     }
+
+    if (hint) list.insertAdjacentHTML('beforeend', hint);
 }
 
 function updateDecisionsBadge() {
@@ -2311,7 +2292,7 @@ function startDeleteDecision(id) {
     actions.dataset.confirming = '1';
     actions.style.opacity = '1';
     actions.innerHTML = `
-        <span style="font-size:11px;color:var(--error-color);white-space:nowrap">Delete?</span>
+        <span style="font-size:11px;color:var(--error-color);white-space:nowrap;margin-right:4px">Delete?</span>
         <button class="confirm-yes" style="background:var(--error-color);color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit" onclick="deleteDecision(${id})">Yes</button>
         <button class="confirm-no" style="background:transparent;color:var(--text-dim);border:1px solid var(--border);border-radius:4px;padding:2px 8px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit" onclick="cancelDeleteDecision(${id})">No</button>
     `;

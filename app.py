@@ -38,10 +38,11 @@ session_token: str = ""
 room_settings: dict = {
     "title": "agentchattr",
     "username": "user",
-    "font": "mono",
+    "font": "sans",
     "max_agent_hops": 4,
     "channels": ["general"],
     "history_limit": "all",
+    "contrast": "normal",
 }
 
 # Channel validation
@@ -700,6 +701,8 @@ async def websocket_endpoint(websocket: WebSocket):
                         router.max_hops = hops
                     except (ValueError, TypeError):
                         pass
+                if "contrast" in new and new["contrast"] in ("normal", "high"):
+                    room_settings["contrast"] = new["contrast"]
                 if "history_limit" in new:
                     val = str(new["history_limit"]).strip().lower()
                     if val == "all":
@@ -843,64 +846,24 @@ async def heartbeat(agent_name: str):
 
 # --- Open agent session in terminal ---
 
-@app.post("/api/open-session/{agent_name}")
-async def open_session(agent_name: str):
-    """Spawn a terminal window with the agent's resume command."""
-    if agent_name not in config.get("agents", {}):
-        return JSONResponse({"error": f"Unknown agent: {agent_name}"}, status_code=404)
-
-    session_id = agents._sessions.get(agent_name)
-    if not session_id:
-        return JSONResponse({"error": f"No session for {agent_name} yet."}, status_code=404)
-
-    agent_cfg = config["agents"][agent_name]
-    cwd = agent_cfg.get("cwd", ".")
-    cmd_name = agent_cfg.get("command", agent_name)
-
-    # Build resume command from config, defaulting to --resume
-    resume_flag = agent_cfg.get("resume_flag", "--resume")
-    resume_cmd = f"{cmd_name} {resume_flag} {session_id}"
-
-    import os, subprocess
-    clean_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
-
-    if sys.platform == "win32":
-        try:
-            subprocess.Popen(
-                ["wt", "-d", cwd, "--", "cmd", "/k", resume_cmd],
-                env=clean_env,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-        except FileNotFoundError:
-            # Security: use argument list instead of shell=True to prevent injection.
-            subprocess.Popen(
-                ["cmd", "/k", f"cd /d {cwd} && {resume_cmd}"],
-                env=clean_env,
-                creationflags=subprocess.CREATE_NEW_CONSOLE,
-            )
-    else:
-        for term_cmd in [
-            ["gnome-terminal", "--working-directory", cwd, "--", "bash", "-c", f"{resume_cmd}; exec bash"],
-            ["open", "-a", "Terminal", cwd],
-        ]:
-            try:
-                subprocess.Popen(term_cmd, env=clean_env)
-                break
-            except FileNotFoundError:
-                continue
-
-    return JSONResponse({"ok": True, "session_id": session_id, "command": resume_cmd})
+@app.get("/api/platform")
+async def get_platform():
+    """Return the server's platform so the web UI can match path formats."""
+    import sys
+    return JSONResponse({"platform": sys.platform})
 
 
 @app.post("/api/open-path")
 async def open_path(body: dict):
-    """Open a file or directory in Windows Explorer.
+    """Open a file or directory in the native file manager.
+
+    Cross-platform: Explorer on Windows, Finder on macOS, xdg-open on Linux.
 
     Security note: This endpoint is intended for local-only use (127.0.0.1).
-    It calls explorer.exe to reveal/open the given path. Do not expose this
-    server on a public network without additional access controls.
+    Do not expose this server on a public network without additional access controls.
     """
     import subprocess
+    import sys
 
     path = body.get("path", "")
     if not path:
@@ -908,12 +871,28 @@ async def open_path(body: dict):
 
     p = Path(path)
     try:
-        if p.is_file():
-            subprocess.Popen(["explorer", "/select,", str(p)])
-        elif p.is_dir():
-            subprocess.Popen(["explorer", str(p)])
+        if sys.platform == "win32":
+            if p.is_file():
+                subprocess.Popen(["explorer", "/select,", str(p)])
+            elif p.is_dir():
+                subprocess.Popen(["explorer", str(p)])
+            else:
+                return JSONResponse({"error": "path not found"}, status_code=404)
+        elif sys.platform == "darwin":
+            if p.is_file():
+                subprocess.Popen(["open", "-R", str(p)])
+            elif p.is_dir():
+                subprocess.Popen(["open", str(p)])
+            else:
+                return JSONResponse({"error": "path not found"}, status_code=404)
         else:
-            return JSONResponse({"error": "path not found"}, status_code=404)
+            # Linux — xdg-open opens the containing folder for files
+            if p.is_file():
+                subprocess.Popen(["xdg-open", str(p.parent)])
+            elif p.is_dir():
+                subprocess.Popen(["xdg-open", str(p)])
+            else:
+                return JSONResponse({"error": "path not found"}, status_code=404)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 

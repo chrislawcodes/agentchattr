@@ -145,12 +145,13 @@ Dark-themed chat at `localhost:8300` with real-time updates:
 - Reply threading with inline quotes that link back to the parent message
 - GitHub-flavored markdown with code blocks, tables, and copy buttons
 - Slack-style colored @mention pills
-- Clickable Windows file paths (opens in Explorer)
+- Clickable file paths (Explorer on Windows, Finder on macOS, file manager on Linux)
 - Date dividers between different days
 - Configurable history limit per channel
 - Auto-linked URLs
-- Configurable name, room title, and font (mono/serif/sans)
-- Agent status pills — click to open their terminal session
+- Configurable name, font (mono/sans), and high contrast mode
+- Auto-saving settings (no Save button needed)
+- Agent status pills (online/offline)
 
 ### Token cost
 
@@ -249,24 +250,21 @@ host = "127.0.0.1"
 
 [agents.claude]
 command = "claude"          # CLI command (must be on PATH)
-cwd = ".."                  # working directory for terminal sessions
+cwd = ".."                  # working directory for agent
 color = "#a78bfa"           # status pill + @mention color
 label = "Claude"            # display name
-resume_flag = "--resume"    # CLI flag to resume a session
 
 [agents.codex]
 command = "codex"
 cwd = ".."
 color = "#facc15"
 label = "Codex"
-resume_flag = "exec resume"
 
 [agents.gemini]
 command = "gemini"
 cwd = ".."
 color = "#4285f4"
 label = "Gemini"
-resume_flag = "--resume"
 
 [routing]
 default = "none"            # "none" = only @mentions trigger agents

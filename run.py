@@ -59,14 +59,15 @@ def main():
     from fastapi.responses import HTMLResponse
 
     static_dir = ROOT / "static"
-    index_html = (static_dir / "index.html").read_text("utf-8")
 
     @app.get("/")
     async def index():
+        # Read index.html fresh each request so changes take effect without restart.
         # Inject the session token into the HTML so the browser client can use it.
         # This is safe: same-origin policy prevents cross-origin pages from reading
         # the response body, so only the user's own browser tab gets the token.
-        injected = index_html.replace(
+        html = (static_dir / "index.html").read_text("utf-8")
+        injected = html.replace(
             "</head>",
             f'<script>window.__SESSION_TOKEN__="{session_token}";</script>\n</head>',
         )
