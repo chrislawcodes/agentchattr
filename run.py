@@ -14,6 +14,24 @@ ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT))
 
 
+def _load_or_create_session_token(data_dir: Path) -> str:
+    """Persist the browser session token across restarts."""
+    token_file = data_dir / "session_token.txt"
+    if token_file.exists():
+        try:
+            return token_file.read_text("utf-8").strip()
+        except OSError:
+            pass
+    
+    token = secrets.token_hex(32)
+    try:
+        data_dir.mkdir(parents=True, exist_ok=True)
+        token_file.write_text(token, "utf-8")
+    except OSError:
+        pass
+    return token
+
+
 def main():
     logging.basicConfig(
         level=logging.INFO,
@@ -29,8 +47,9 @@ def main():
     with open(config_path, "rb") as f:
         config = tomllib.load(f)
 
-    # --- Security: generate a random session token (in-memory only) ---
-    session_token = secrets.token_hex(32)
+    # --- Security: load or generate session token ---
+    data_dir = ROOT / config.get("server", {}).get("data_dir", "./data")
+    session_token = _load_or_create_session_token(data_dir)
 
     # Configure the FastAPI app (creates shared store)
     from app import app, configure, set_event_loop, store as _store_ref
