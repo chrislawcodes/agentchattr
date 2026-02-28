@@ -118,11 +118,11 @@ for a in agents:
 EOF
 ```
 
-### How to keep Claude's share down
-- Claude coordinates and reviews — does NOT implement features
-- Gemini and Codex post detailed progress updates in chat (not just "DONE")
-- Cross-agent review: Gemini reviews Codex's diff, Codex reviews Gemini's diff
-- Claude's chat messages should be brief: task assignment + go/no-go decisions only
+### Role split
+- **Claude**: assigns tasks, reviews diffs, APPROVE/BLOCK verdicts, merges. Does NOT implement.
+- **Gemini + Codex**: implement, write tests, open PRs, post detailed progress. They carry the work.
+- Claude chat messages should be short: assignments and verdicts only.
+- Gemini and Codex write the substance — detailed updates every 3 min while working.
 
 ---
 
