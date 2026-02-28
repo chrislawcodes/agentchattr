@@ -19,7 +19,8 @@ store = None
 decisions = None
 room_settings = None  # set by run.py — dict with "channels" list etc.
 _presence: dict[str, float] = {}
-_presence_lock = threading.Lock()
+_activity: dict[str, bool] = {}   # True = screen changed on last poll
+_presence_lock = threading.Lock()   # guards both _presence and _activity
 _cursors: dict[str, dict[str, int]] = {}  # agent_name → {channel_name → last_id}
 _cursors_lock = threading.Lock()
 PRESENCE_TIMEOUT = 120  # 2 missed heartbeats (60s interval) = offline
@@ -218,6 +219,16 @@ def is_online(name: str) -> bool:
     now = time.time()
     with _presence_lock:
         return name in _presence and now - _presence.get(name, 0) < PRESENCE_TIMEOUT
+
+
+def set_active(name: str, active: bool):
+    with _presence_lock:
+        _activity[name] = active
+
+
+def is_active(name: str) -> bool:
+    with _presence_lock:
+        return _activity.get(name, False)
 
 
 def chat_decision(action: str, sender: str, decision: str = "", reason: str = "") -> str:

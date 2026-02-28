@@ -229,6 +229,8 @@ def configure(cfg: dict, session_token: str = ""):
 
     _known_online: set[str] = set()  # agents we've seen join — track for leave messages
 
+    _known_active: set[str] = set()
+
     def _background_checks():
         import time as _time
         import mcp_bridge
@@ -255,6 +257,10 @@ def configure(cfg: dict, session_token: str = ""):
                         name for name, ts in mcp_bridge._presence.items()
                         if now - ts < mcp_bridge.PRESENCE_TIMEOUT
                     }
+                    currently_active = {
+                        name for name, active in mcp_bridge._activity.items()
+                        if active
+                    }
                 # Detect agents that were online but are no longer
                 went_offline = _known_online - currently_online
                 came_online = currently_online - _known_online
@@ -263,6 +269,12 @@ def configure(cfg: dict, session_token: str = ""):
                     channels = room_settings.get("channels", ["general"])
                     for ch in channels:
                         store.add(name, f"{name} disconnected", msg_type="leave", channel=ch)
+                    if _event_loop:
+                        asyncio.run_coroutine_threadsafe(broadcast_status(), _event_loop)
+                # Broadcast on activity state changes (agent starts/stops working)
+                if currently_active != _known_active:
+                    _known_active.clear()
+                    _known_active.update(currently_active)
                     if _event_loop:
                         asyncio.run_coroutine_threadsafe(broadcast_status(), _event_loop)
                 _known_online.clear()
@@ -836,11 +848,18 @@ async def delete_hat(agent_name: str):
 
 
 @app.post("/api/heartbeat/{agent_name}")
-async def heartbeat(agent_name: str):
-    """Wrapper calls this every 60s to keep presence alive."""
+async def heartbeat(agent_name: str, request: Request):
+    """Wrapper calls this to keep presence alive and report activity."""
     import mcp_bridge
     with mcp_bridge._presence_lock:
         mcp_bridge._presence[agent_name] = __import__("time").time()
+    # Optional activity report from wrapper's terminal monitor
+    try:
+        body = await request.json()
+        if "active" in body:
+            mcp_bridge.set_active(agent_name, bool(body["active"]))
+    except Exception:
+        pass  # No body = plain heartbeat
     return {"ok": True}
 
 

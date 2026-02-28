@@ -753,6 +753,7 @@ function buildStatusPills() {
         const pill = document.createElement('div');
         pill.className = 'status-pill';
         pill.id = `status-${name}`;
+        pill.style.setProperty('--agent-color', cfg.color || '#4ade80');
         pill.innerHTML = `<span class="status-dot"></span><span class="status-label">${escapeHtml(cfg.label || name)}</span>`;
         container.appendChild(pill);
     }
@@ -766,14 +767,17 @@ function updateStatus(data) {
         const pill = document.getElementById(`status-${name}`);
         if (!pill) continue;
 
-        pill.classList.remove('available', 'busy', 'offline');
-        if (info.busy) {
-            pill.classList.add('busy');
+        pill.classList.remove('available', 'working', 'offline');
+        if (info.busy && info.available) {
+            pill.classList.add('working');
         } else if (info.available) {
             pill.classList.add('available');
         } else {
             pill.classList.add('offline');
         }
+
+        // Keep agent color in sync
+        if (info.color) pill.style.setProperty('--agent-color', info.color);
     }
 }
 

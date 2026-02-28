@@ -87,6 +87,9 @@ Agents wake each other up, coordinate, and report back.
 ### Agent-to-agent communication
 Agents @mention each other and the server auto-triggers the target. Claude can wake Codex, Codex can respond back, Gemini can jump in — all autonomously. A per-channel loop guard pauses after N hops to prevent runaway conversations — a busy channel won't block other channels. Type `/continue` to resume.
 
+### Activity indicators
+Status pills show a spinning border in each agent's color when that agent is actively working — so you can minimize the terminals and still know at a glance who's busy. Detection works by hashing the agent's terminal screen buffer every second: if anything changes (spinner, streaming text, tool output), the pill lights up. When the screen stops changing, it stops instantly. Cross-platform — Windows uses `ReadConsoleOutputW`, Mac/Linux uses `tmux capture-pane`.
+
 ### Channels
 Conversations are organized into channels (like Slack). The default channel is `#general`. Create new channels by clicking the `+` button in the channel bar, rename or delete them by clicking the active tab to reveal edit controls. Channels persist across server restarts.
 
@@ -151,7 +154,7 @@ Dark-themed chat at `localhost:8300` with real-time updates:
 - Auto-linked URLs
 - Configurable name, font (mono/sans), and high contrast mode
 - Auto-saving settings (no Save button needed)
-- Agent status pills (online/offline)
+- Agent status pills (online/working/offline) with animated activity indicators
 
 ### Token cost
 
@@ -307,9 +310,9 @@ sse_port = 8201             # MCP SSE transport (Gemini)
 | `router.py` | @mention parsing, agent routing, loop guard |
 | `agents.py` | Writes trigger queue files for wrapper to pick up |
 | `mcp_bridge.py` | MCP tool definitions (`chat_send`, `chat_read`, etc.) |
-| `wrapper.py` | Cross-platform dispatcher for auto-triggering agents + heartbeat |
-| `wrapper_windows.py` | Windows: injects keystrokes via Win32 `WriteConsoleInput` |
-| `wrapper_unix.py` | Mac/Linux: injects keystrokes via `tmux send-keys` |
+| `wrapper.py` | Cross-platform dispatcher — auto-trigger, heartbeat, activity monitor |
+| `wrapper_windows.py` | Windows: keystroke injection + screen buffer activity detection |
+| `wrapper_unix.py` | Mac/Linux: tmux keystroke injection + pane capture activity detection |
 | `config.toml` | All configuration (agents, ports, routing) |
 | `windows/start_*_yolo/bypass.bat` | Auto-approve launchers (Windows) |
 | `macos-linux/start_*_yolo/bypass.sh` | Auto-approve launchers (Mac/Linux) |

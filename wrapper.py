@@ -232,11 +232,46 @@ def main():
     monitor = threading.Thread(target=_watcher_monitor, daemon=True)
     monitor.start()
 
+    # Activity monitor — detect terminal output and report to server
+    _activity_checker = None
+
+    def _set_activity_checker(checker):
+        nonlocal _activity_checker
+        _activity_checker = checker
+
+    def _activity_monitor():
+        import urllib.request
+        url = f"http://127.0.0.1:{server_port}/api/heartbeat/{agent}"
+        last_active = None
+        while True:
+            time.sleep(1)
+            if not _activity_checker:
+                continue
+            try:
+                active = _activity_checker()
+                if active != last_active:
+                    body = json.dumps({"active": active}).encode()
+                    req = urllib.request.Request(
+                        url, method="POST", data=body,
+                        headers={"Content-Type": "application/json"},
+                    )
+                    urllib.request.urlopen(req, timeout=5)
+                    last_active = active
+            except Exception:
+                pass
+
+    threading.Thread(target=_activity_monitor, daemon=True).start()
+
     # Dispatch to platform-specific runner
+    _agent_pid = [None]  # shared mutable — run_agent sets [0] to the child PID
+
     if sys.platform == "win32":
-        from wrapper_windows import run_agent
+        from wrapper_windows import run_agent, get_activity_checker
+        _set_activity_checker(get_activity_checker(_agent_pid))
     else:
-        from wrapper_unix import run_agent
+        from wrapper_unix import run_agent, get_activity_checker
+        session_name = f"agentchattr-{agent}"
+        _set_activity_checker(get_activity_checker(session_name))
 
     run_agent(
         command=command,
@@ -248,6 +283,7 @@ def main():
         no_restart=args.no_restart,
         start_watcher=start_watcher,
         strip_env=list(strip_vars),
+        pid_holder=_agent_pid,
     )
 
     print("  Wrapper stopped.")

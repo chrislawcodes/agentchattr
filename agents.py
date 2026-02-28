@@ -19,11 +19,11 @@ class AgentTrigger:
         return False  # Worker handles busy state
 
     def get_status(self) -> dict:
-        from mcp_bridge import is_online
+        from mcp_bridge import is_online, is_active
         return {
             name: {
                 "available": is_online(name),
-                "busy": False,
+                "busy": is_active(name),
                 "label": cfg.get("label", name),
                 "color": cfg.get("color", "#888"),
             }

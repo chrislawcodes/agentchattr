@@ -44,7 +44,27 @@ def inject(text: str, *, tmux_session: str):
     )
 
 
-def run_agent(command, extra_args, cwd, env, queue_file, agent, no_restart, start_watcher, strip_env=None):
+def get_activity_checker(session_name):
+    """Return a callable that detects tmux pane output by hashing content."""
+    last_hash = [None]
+
+    def check():
+        try:
+            result = subprocess.run(
+                ["tmux", "capture-pane", "-t", session_name, "-p"],
+                capture_output=True, timeout=2,
+            )
+            h = hash(result.stdout)
+            changed = last_hash[0] is not None and h != last_hash[0]
+            last_hash[0] = h
+            return changed
+        except Exception:
+            return False
+
+    return check
+
+
+def run_agent(command, extra_args, cwd, env, queue_file, agent, no_restart, start_watcher, strip_env=None, pid_holder=None):
     """Run agent inside a tmux session, inject via tmux send-keys."""
     _check_tmux()
 

@@ -125,19 +125,47 @@ header h1 {
 }
 
 .status-pill.available .status-dot { background: #4ade80; }
-.status-pill.busy .status-dot {
-    background: #4ade80;
-    animation: pulse 1.2s ease-in-out infinite;
-}
 .status-pill.offline .status-dot { background: #555; }
 
 .status-pill.offline {
     opacity: 0.4;
 }
 
-@keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.3; }
+/* Working state — rotating border in agent color */
+@property --border-angle {
+    syntax: "<angle>";
+    initial-value: 0deg;
+    inherits: false;
+}
+
+.status-pill.working {
+    position: relative;
+    border-color: transparent;
+}
+
+.status-pill.working .status-dot { background: #4ade80; }
+
+.status-pill.working::before {
+    content: '';
+    position: absolute;
+    inset: -1.5px;
+    border-radius: inherit;
+    padding: 1.5px;
+    background: conic-gradient(
+        from var(--border-angle),
+        var(--agent-color, #4ade80),
+        transparent 40%,
+        transparent 60%,
+        var(--agent-color, #4ade80)
+    );
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    animation: spin-border 2s linear infinite;
+}
+
+@keyframes spin-border {
+    to { --border-angle: 360deg; }
 }
 
 .settings-btn {
