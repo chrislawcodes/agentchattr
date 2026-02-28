@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import re as _re
 import sys
 import threading
 import uuid
