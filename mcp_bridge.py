@@ -252,7 +252,7 @@ def _create_server(port: int) -> FastMCP:
         "agentchattr",
         host="127.0.0.1",
         port=port,
-        log_level="ERROR",
+        log_level="INFO",
         instructions=_MCP_INSTRUCTIONS,
     )
     for func in _ALL_TOOLS:

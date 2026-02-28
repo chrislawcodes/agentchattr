@@ -353,7 +353,7 @@ async def broadcast(msg: dict):
 
 async def broadcast_status():
     status = agents.get_status()
-    status["paused"] = router.is_paused
+    status["paused"] = router.is_paused()
     data = json.dumps({"type": "status", "data": status})
     dead = set()
     for client in ws_clients:
