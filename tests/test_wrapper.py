@@ -1,6 +1,7 @@
 """Tests for wrapper.py — cooldown selection and queue watcher logic."""
 
 import sys
+import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -312,3 +313,44 @@ def test_inject_windows_sends_escape_before_text():
             # Check that "test" follows
             assert calls[2][0][1] == "t"
 
+
+def test_watch_for_server_restart_triggers_on_change(tmp_path):
+    """Verify that _watch_for_server_restart sends C-c after 2 cycles of a changed timestamp."""
+    from wrapper import _watch_for_server_restart
+    
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    started_at_file = data_dir / "server_started_at.txt"
+    
+    # 1. Initial state: server is "running" at time 1000
+    started_at_file.write_text("1000.0")
+    
+    stop_event = MagicMock()
+    # is_set() is checked at loop start and after wait(). 
+    # Return False enough times to allow 3 full cycles.
+    stop_event.is_set.side_effect = [False] * 10 
+    
+    with patch("subprocess.run") as mock_run:
+        def wait_side_effect(timeout):
+            if wait_side_effect.call_count == 1:
+                # After first cycle wait, change the timestamp
+                started_at_file.write_text("2000.0")
+            elif wait_side_effect.call_count == 2:
+                # After second cycle wait, keep it at 2000.0 to confirm
+                pass
+            elif wait_side_effect.call_count == 3:
+                # After third cycle (restart sent), signal loop stop
+                stop_event.is_set.side_effect = [True] * 10
+            
+            wait_side_effect.call_count += 1
+            return False
+
+        wait_side_effect.call_count = 0
+        stop_event.wait.side_effect = wait_side_effect
+        
+        _watch_for_server_restart(data_dir, "test-session", stop_event)
+        
+    # Verify kill-session was sent exactly once to the correct session
+    kill_calls = [c for c in mock_run.call_args_list if "kill-session" in str(c[0][0])]
+    assert len(kill_calls) == 1, f"Expected 1 kill-session call, got {len(kill_calls)}"
+    assert "test-session" in kill_calls[0][0][0]

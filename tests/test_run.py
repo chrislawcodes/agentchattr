@@ -77,7 +77,7 @@ def test_server_watch_sends_c_after_second_cycle(tmp_path):
     sent_c = []
 
     def fake_subprocess_run(cmd, **kwargs):
-        if "C-c" in cmd:
+        if "kill-session" in cmd:
             sent_c.append(True)
         return MagicMock(returncode=0)
 
@@ -91,7 +91,7 @@ def test_server_watch_sends_c_after_second_cycle(tmp_path):
             # First cycle: change the timestamp (detection)
             started_at.write_text("200.0", "utf-8")
         elif call_count[0] == 2:
-            # Second cycle: same new timestamp (confirmation) → C-c should fire
+            # Second cycle: same new timestamp (confirmation) → restart should fire
             pass
         elif call_count[0] >= 3:
             stop_event.set()
@@ -102,11 +102,11 @@ def test_server_watch_sends_c_after_second_cycle(tmp_path):
     with patch("subprocess.run", side_effect=fake_subprocess_run):
         _watch_for_server_restart(tmp_path, "agentchattr-test", stop_event)
 
-    assert len(sent_c) == 1, "C-c should be sent exactly once after second cycle"
+    assert len(sent_c) == 1, "tmux kill-session should be sent exactly once after second cycle"
 
 
 def test_server_watch_does_not_send_c_on_first_cycle(tmp_path):
-    """C-c is NOT sent on the first cycle after timestamp change."""
+    """tmux kill-session is NOT sent on the first cycle after timestamp change."""
     from wrapper import _watch_for_server_restart
 
     started_at = tmp_path / "server_started_at.txt"
@@ -116,7 +116,7 @@ def test_server_watch_does_not_send_c_on_first_cycle(tmp_path):
     sent_c = []
 
     def fake_subprocess_run(cmd, **kwargs):
-        if "C-c" in cmd:
+        if "kill-session" in cmd:
             sent_c.append(True)
         return MagicMock(returncode=0)
 

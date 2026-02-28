@@ -203,6 +203,11 @@ def chat_who() -> str:
     return f"Online: {', '.join(online)}" if online else "Nobody online."
 
 
+def chat_ping() -> str:
+    """Lightweight liveness check with no side effects."""
+    return "pong"
+
+
 def _get_online() -> list[str]:
     now = time.time()
     with _presence_lock:
@@ -238,7 +243,7 @@ def is_busy(name: str) -> bool:
 # --- Server instances ---
 
 _ALL_TOOLS = [
-    chat_send, chat_read, chat_resync, chat_join, chat_who,
+    chat_send, chat_read, chat_resync, chat_join, chat_who, chat_ping,
 ]
 
 
@@ -285,4 +290,3 @@ if __name__ == "__main__":
     
     server = _create_server(0)  # port doesn't matter for stdio
     server.run(transport="stdio")
-
