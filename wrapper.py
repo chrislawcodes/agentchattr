@@ -161,13 +161,20 @@ def main():
     data_dir.mkdir(parents=True, exist_ok=True)
     queue_file = data_dir / f"{agent}_queue.jsonl"
 
+    # Flush stale queue entries from previous crashed sessions
+    if queue_file.exists():
+        queue_file.write_text("", "utf-8")
+
     # Auto-configure MCP in the agent's working directory so it just works
     mcp_cfg = config.get("mcp", {})
     project_dir = (ROOT / cwd).resolve()
     _ensure_mcp(project_dir, mcp_cfg)
 
-    # Strip CLAUDECODE to avoid "nested session" detection
-    env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+    # Strip CLAUDECODE to avoid "nested session" detection.
+    # Also strip any env vars listed in the agent's strip_env config
+    # (e.g. ANTHROPIC_API_KEY so Claude uses its stored OAuth credentials).
+    strip_vars = {"CLAUDECODE"} | set(agent_cfg.get("strip_env", []))
+    env = {k: v for k, v in os.environ.items() if k not in strip_vars}
 
     # Resolve command on PATH
     resolved = shutil.which(command)
@@ -240,6 +247,7 @@ def main():
         agent=agent,
         no_restart=args.no_restart,
         start_watcher=start_watcher,
+        strip_env=list(strip_vars),
     )
 
     print("  Wrapper stopped.")
