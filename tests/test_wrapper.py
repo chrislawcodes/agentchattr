@@ -393,17 +393,17 @@ def test_watch_for_server_restart_triggers_on_change(tmp_path):
     assert "test-session" in kill_calls[0][0][0]
 
 
-def test_watch_mcp_health_kills_immediately_on_sse_failure():
-    """If sse_url is provided, a single probe failure should trigger an immediate kill."""
+def test_watch_mcp_health_kills_after_multiple_sse_failures():
+    """If sse_url is provided, consecutive probe failures (5) should trigger a kill."""
     from wrapper import _watch_mcp_health
     
     stop_event = MagicMock()
-    # is_set() is checked at loop start. Return False, then True to exit after one check.
-    stop_event.is_set.side_effect = [False, True]
+    # is_set() is checked at loop start. Loop 5 times (return False 5 times), then True.
+    stop_event.is_set.side_effect = [False, False, False, False, False, True]
     
     # wait() is called for grace period (60s) AND at end of loop.
-    # Return False for grace period, then True for loop end.
-    stop_event.wait.side_effect = [False, True]
+    # We need 1 grace period wait + 5 loop sleeps.
+    stop_event.wait.side_effect = [False, False, False, False, False, True]
 
     with patch("wrapper._check_sse_health", return_value=False) as mock_check, \
          patch("wrapper._kill_tmux_session") as mock_kill, \
@@ -416,7 +416,7 @@ def test_watch_mcp_health_kills_immediately_on_sse_failure():
             sse_url="http://127.0.0.1:8201/sse"
         )
         
-    mock_check.assert_called_once()
+    assert mock_check.call_count == 5
     mock_kill.assert_called_once_with("test-session")
 
 

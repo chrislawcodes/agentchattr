@@ -12,13 +12,13 @@ def test_monitor_triggers_on_stale_queue(tmp_path):
     inject_fn = MagicMock()
     state = MonitorState()
     
-    # Set last inject to 10 minutes ago
-    state.last_inject_at = time.time() - 600
+    # Set last inject to 20 minutes ago
+    state.last_inject_at = time.time() - 1200
     
     # Patch time.sleep to run only once
     with patch("time.sleep", side_effect=[None, SystemExit]):
         with pytest.raises(SystemExit):
-            _task_monitor(queue_file, inject_fn, state, timeout_minutes=5.0)
+            _task_monitor(queue_file, inject_fn, state, timeout_minutes=15.0)
             
     inject_fn.assert_called_once_with("chat - use mcp")
     # Verify it updated the timestamp
@@ -36,7 +36,7 @@ def test_monitor_skips_if_queue_empty(tmp_path):
     
     with patch("time.sleep", side_effect=[None, SystemExit]):
         with pytest.raises(SystemExit):
-            _task_monitor(queue_file, inject_fn, state, timeout_minutes=5.0)
+            _task_monitor(queue_file, inject_fn, state, timeout_minutes=15.0)
             
     inject_fn.assert_not_called()
 
@@ -54,6 +54,6 @@ def test_monitor_skips_if_recent_activity(tmp_path):
     
     with patch("time.sleep", side_effect=[None, SystemExit]):
         with pytest.raises(SystemExit):
-            _task_monitor(queue_file, inject_fn, state, timeout_minutes=5.0)
+            _task_monitor(queue_file, inject_fn, state, timeout_minutes=15.0)
             
     inject_fn.assert_not_called()

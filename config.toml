@@ -2,7 +2,7 @@
 port = 8300
 host = "127.0.0.1"
 data_dir = "./data"
-agent_task_timeout_minutes = 5.0
+agent_task_timeout_minutes = 15.0
 
 # Add agents here. Each gets a status pill, @mention routing, and color.
 # "cwd" is the working directory for the agent's terminal session.
@@ -30,7 +30,7 @@ command = "gemini"
 cwd = ".."
 color = "#4285f4"
 label = "Gemini"
-resume_flag = "--resume"
+resume_flag = "--resume --approval-mode yolo"
 trigger_cooldown = 4.0
 
 [routing]

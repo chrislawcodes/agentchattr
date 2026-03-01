@@ -161,12 +161,18 @@ def _queue_watcher(queue_file: Path, agent_name: str, inject_fn, agent_cfg: dict
                     last_inject_at = state.get_last_inject()
                     elapsed = now - last_inject_at
                     if elapsed < cooldown:
-                        time.sleep(cooldown - elapsed)
+                        wait = cooldown - elapsed
+                        log.debug("[inject] %s debouncing for %.1fs", agent_name, wait)
+                        time.sleep(wait)
                     # Small delay to let the TUI settle
                     time.sleep(0.5)
+                    log.info("[inject] %s firing 'chat - use mcp' (%d item(s) queued)", agent_name, sum(1 for l in lines if l.strip()))
                     ok = inject_fn("chat - use mcp")
                     if ok is not False:  # None (old callers) or True = success
                         state.record_inject()
+                        log.debug("[inject] %s inject succeeded", agent_name)
+                    else:
+                        log.warning("[inject] %s inject FAILED (tmux session unreachable?)", agent_name)
         except Exception as e:
             log.exception("queue watcher error (agent=%s): %s", agent_name, e)
 
@@ -194,8 +200,9 @@ def _task_monitor(queue_file: Path, inject_fn, state: MonitorState, timeout_minu
 def _kill_tmux_session(tmux_session: str):
     """Kill a tmux session so the wrapper's restart loop recreates it."""
     if sys.platform == "win32":
-        log.info("Skipping tmux restart on Windows for session %s", tmux_session)
+        log.info("[kill] Skipping tmux restart on Windows for session %s", tmux_session)
         return
+    log.warning("[kill] Terminating tmux session: %s", tmux_session)
     subprocess.run(["tmux", "kill-session", "-t", tmux_session], capture_output=True)
 
 
@@ -254,9 +261,23 @@ def _call_mcp_tool(
 
 
 def _check_mcp_health(mcp_url: str) -> bool:
-    """Return True when the local MCP HTTP endpoint responds to chat_ping."""
-    ok, body = _call_mcp_tool(mcp_url, "chat_ping")
-    return ok and "pong" in body
+    """Return True when the MCP server port is accepting TCP connections.
+
+    A TCP-level check is used instead of a full MCP tool call because the
+    wrapper's direct HTTP client doesn't speak the MCP streamable-http session
+    protocol (causing 406 errors on tool-call attempts). Checking that the
+    port is open is sufficient — if the server process dies, the port closes.
+    """
+    import socket
+    import urllib.parse
+    parsed = urllib.parse.urlparse(mcp_url)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or 8200
+    try:
+        with socket.create_connection((host, port), timeout=5):
+            return True
+    except OSError:
+        return False
 
 
 def _check_sse_health(sse_url: str) -> bool:
@@ -332,44 +353,67 @@ def _watch_for_server_restart(data_dir: Path, tmux_session: str, stop_event: thr
 
 
 def _watch_mcp_health(mcp_url: str, tmux_session: str, stop_event: threading.Event, sse_url: str = None):
-    """Restart the tmux session after repeated MCP health check failures.
-    
-    If sse_url is provided, performs a fast (30s) probe of the SSE transport.
+    """Log MCP health check results and restart the tmux session only after
+    sustained consecutive failures — never on a single transient failure.
+
+    SSE threshold:  5 consecutive failures (~2.5 min at 30s intervals)
+    HTTP threshold: 10 consecutive failures (~50 min at 5min intervals)
+
+    A single blip will be logged but will NOT trigger a session kill.
     """
-    failures = 0
+    # Separate counters so an SSE recovery doesn't hide HTTP failures and vice versa.
+    http_failures = 0
+    sse_failures = 0
+    SSE_KILL_THRESHOLD = 5
+    HTTP_KILL_THRESHOLD = 10
 
     # Grace period so the local MCP server can finish booting before checks start.
     if stop_event.wait(60):
         return
 
     while not stop_event.is_set():
-        # 1. Fast SSE probe (if applicable)
+        # 1. SSE probe (if applicable — Gemini only)
         if sse_url:
-            if not _check_sse_health(sse_url):
-                log.warning("MCP SSE transport failed for %s — restarting immediately", tmux_session)
-                _kill_tmux_session(tmux_session)
-                # After restart, wait for recovery before next check
-                if stop_event.wait(60):
-                    break
-                failures = 0
-                continue
+            sse_ok = _check_sse_health(sse_url)
+            if sse_ok:
+                if sse_failures > 0:
+                    log.info("[health] %s SSE recovered after %d failure(s)", tmux_session, sse_failures)
+                else:
+                    log.debug("[health] %s SSE check OK", tmux_session)
+                sse_failures = 0
+            else:
+                sse_failures += 1
+                log.warning(
+                    "[health] %s SSE check FAILED (%d/%d before kill)",
+                    tmux_session, sse_failures, SSE_KILL_THRESHOLD,
+                )
+                if sse_failures >= SSE_KILL_THRESHOLD:
+                    _kill_tmux_session(tmux_session)
+                    sse_failures = 0
+                    # Wait for recovery before resuming checks
+                    if stop_event.wait(60):
+                        break
+                    continue
 
-        # 2. Regular HTTP tool-call probe
+        # 2. HTTP tool-call probe
         healthy = _check_mcp_health(mcp_url)
         if healthy:
-            failures = 0
+            if http_failures > 0:
+                log.info("[health] %s HTTP ping recovered after %d failure(s)", tmux_session, http_failures)
+            else:
+                log.debug("[health] %s HTTP ping OK", tmux_session)
+            http_failures = 0
         else:
-            failures += 1
-            if failures >= 3:
-                log.warning(
-                    "MCP health failed %d times in a row — restarting tmux session %s",
-                    failures,
-                    tmux_session,
-                )
+            http_failures += 1
+            log.warning(
+                "[health] %s HTTP ping FAILED (%d/%d before kill)",
+                tmux_session, http_failures, HTTP_KILL_THRESHOLD,
+            )
+            if http_failures >= HTTP_KILL_THRESHOLD:
                 _kill_tmux_session(tmux_session)
-                failures = 0
+                http_failures = 0
 
-        # Poll interval: 30s if we have an SSE transport to monitor, else 5m
+        # Poll interval: 30s when monitoring SSE, 5min for HTTP-only agents
         interval = 30 if sse_url else 300
         if stop_event.wait(interval):
             break
@@ -409,7 +453,7 @@ def main():
     agent = args.agent
     agent_cfg = config.get("agents", {}).get(agent, {})
     server_cfg = config.get("server", {})
-    task_timeout = float(server_cfg.get("agent_task_timeout_minutes", 5.0))
+    task_timeout = float(server_cfg.get("agent_task_timeout_minutes", 15.0))
 
     # Append resume_flag from config if not already manually provided
     resume_flag = agent_cfg.get("resume_flag")
@@ -424,6 +468,24 @@ def main():
     data_dir = ROOT / config.get("server", {}).get("data_dir", "./data")
     data_dir.mkdir(parents=True, exist_ok=True)
     queue_file = data_dir / f"{agent}_queue.jsonl"
+
+    # Configure logging for this wrapper process.
+    # wrapper.py runs as a standalone process (not via run.py), so we must
+    # call basicConfig ourselves. Without this, log.info/debug are silently dropped.
+    _fmt = logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S"
+    )
+    _console = logging.StreamHandler()
+    _console.setFormatter(_fmt)
+    _file = logging.FileHandler(data_dir / f"{agent}_stability.log", encoding="utf-8")
+    _file.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)-8s %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    )
+    root_log = logging.getLogger()
+    root_log.setLevel(logging.DEBUG)
+    root_log.addHandler(_console)
+    root_log.addHandler(_file)
+    log.info("[start] wrapper starting for agent=%s pid=%d", agent, os.getpid())
 
     # Monitor state shared between threads
     state = MonitorState()
@@ -520,6 +582,7 @@ def main():
     heartbeat_watcher.start()
 
     def on_session_started():
+        log.info("[session] %s tmux session started — announcing join", agent)
         threading.Thread(
             target=_announce_join,
             args=(mcp_http_url, agent),
