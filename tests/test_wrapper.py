@@ -454,3 +454,36 @@ def test_check_sse_health_sends_event_stream_accept_header():
 
     req = mock_urlopen.call_args[0][0]
     assert req.headers["Accept"] == "text/event-stream"
+
+
+def test_announce_join_retries_until_success():
+    """_announce_join should retry failed startup joins before giving up."""
+    from wrapper import _announce_join
+
+    with patch("wrapper._call_mcp_tool") as mock_call, \
+         patch("time.sleep") as mock_sleep, \
+         patch("wrapper.log.warning") as mock_warning:
+        mock_call.side_effect = [
+            (False, ""),
+            (False, ""),
+            (True, "Joined. Online: codex"),
+        ]
+
+        _announce_join("http://127.0.0.1:8200/mcp", "codex")
+
+    assert mock_call.call_count == 3
+    assert mock_sleep.call_count == 2
+    mock_sleep.assert_called_with(5.0)
+    assert mock_warning.call_count == 2
+
+
+def test_announce_join_stops_after_retry_limit():
+    """_announce_join should stop retrying after the configured retry limit."""
+    from wrapper import _announce_join
+
+    with patch("wrapper._call_mcp_tool", return_value=(False, "")) as mock_call, \
+         patch("time.sleep") as mock_sleep:
+        _announce_join("http://127.0.0.1:8200/mcp", "codex")
+
+    assert mock_call.call_count == 3
+    assert mock_sleep.call_count == 2

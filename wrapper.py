@@ -33,6 +33,8 @@ SERVER_NAME = "agentchattr"
 DEFAULT_TRIGGER_COOLDOWN_SECONDS = 2.0
 MCP_TOOL_CALL_TIMEOUT_SECONDS = 5.0
 RESTART_WATCH_INTERVAL_SECONDS = 10.0
+ANNOUNCE_JOIN_RETRIES = 3
+ANNOUNCE_JOIN_RETRY_DELAY_SECONDS = 5.0
 
 # ---------------------------------------------------------------------------
 # MCP auto-config — ensure .mcp.json and .gemini/settings.json exist
@@ -274,11 +276,21 @@ def _check_sse_health(sse_url: str) -> bool:
 
 def _announce_join(mcp_url: str, agent_name: str):
     """Emit chat_join after the agent session starts so presence resets immediately."""
-    ok, body = _call_mcp_tool(mcp_url, "chat_join", {"name": agent_name})
-    if not ok:
-        log.warning("Failed to announce chat_join for %s", agent_name)
-    elif "Joined." not in body:
-        log.warning("Unexpected chat_join response for %s: %s", agent_name, body)
+    for attempt in range(1, ANNOUNCE_JOIN_RETRIES + 1):
+        ok, body = _call_mcp_tool(mcp_url, "chat_join", {"name": agent_name})
+        if ok:
+            if "Joined." not in body:
+                log.warning("Unexpected chat_join response for %s: %s", agent_name, body)
+            return
+
+        log.warning(
+            "Failed to announce chat_join for %s (attempt %d/%d)",
+            agent_name,
+            attempt,
+            ANNOUNCE_JOIN_RETRIES,
+        )
+        if attempt < ANNOUNCE_JOIN_RETRIES:
+            time.sleep(ANNOUNCE_JOIN_RETRY_DELAY_SECONDS)
 
 
 # ---------------------------------------------------------------------------
