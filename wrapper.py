@@ -352,20 +352,20 @@ def _watch_for_server_restart(data_dir: Path, tmux_session: str, stop_event: thr
             pending_restart = False
 
 
-def _watch_mcp_health(mcp_url: str, tmux_session: str, stop_event: threading.Event, sse_url: str = None):
+def _watch_mcp_health(mcp_url: str, tmux_session: str, stop_event: threading.Event, sse_url: str = None, sse_kill_threshold: int = 5, http_kill_threshold: int = 10):
     """Log MCP health check results and restart the tmux session only after
     sustained consecutive failures — never on a single transient failure.
 
-    SSE threshold:  5 consecutive failures (~2.5 min at 30s intervals)
-    HTTP threshold: 10 consecutive failures (~50 min at 5min intervals)
+    SSE threshold:  configurable, default 5 (~2.5 min at 30s intervals)
+    HTTP threshold: configurable, default 10 (~50 min at 5min intervals)
 
     A single blip will be logged but will NOT trigger a session kill.
     """
     # Separate counters so an SSE recovery doesn't hide HTTP failures and vice versa.
     http_failures = 0
     sse_failures = 0
-    SSE_KILL_THRESHOLD = 5
-    HTTP_KILL_THRESHOLD = 10
+    SSE_KILL_THRESHOLD = sse_kill_threshold
+    HTTP_KILL_THRESHOLD = http_kill_threshold
 
     # Grace period so the local MCP server can finish booting before checks start.
     if stop_event.wait(60):
@@ -569,7 +569,14 @@ def main():
     server_watcher.start()
     health_watcher = threading.Thread(
         target=_watch_mcp_health,
-        args=(mcp_http_url, tmux_session, _stop_event, mcp_sse_url),
+        args=(
+            mcp_http_url, 
+            tmux_session, 
+            _stop_event, 
+            mcp_sse_url, 
+            int(mcp_cfg.get('sse_kill_threshold', 5)),
+            int(mcp_cfg.get('http_kill_threshold', 10))
+        ),
         daemon=True,
     )
     health_watcher.start()

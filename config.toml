@@ -42,6 +42,8 @@ max_agent_hops = 999
 http_port = 8200
 sse_port = 8201
 activity_timeout_seconds = 120
+sse_kill_threshold = 5
+http_kill_threshold = 10
 
 [cleanup]
 enabled = false

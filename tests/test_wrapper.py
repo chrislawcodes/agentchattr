@@ -420,6 +420,32 @@ def test_watch_mcp_health_kills_after_multiple_sse_failures():
     mock_kill.assert_called_once_with("test-session")
 
 
+def test_watch_mcp_health_respects_custom_thresholds():
+    """Custom thresholds should be respected over defaults."""
+    from wrapper import _watch_mcp_health
+    
+    stop_event = MagicMock()
+    # Loop 3 times for a custom threshold of 3, then exit.
+    stop_event.is_set.side_effect = [False, False, False, True]
+    stop_event.wait.side_effect = [False, False, False, False, True]
+
+    with patch("wrapper._check_sse_health", return_value=False) as mock_check, \
+         patch("wrapper._kill_tmux_session") as mock_kill, \
+         patch("wrapper._check_mcp_health", return_value=True):
+        
+        _watch_mcp_health(
+            mcp_url="http://127.0.0.1:8200/mcp",
+            tmux_session="test-session",
+            stop_event=stop_event,
+            sse_url="http://127.0.0.1:8201/sse",
+            sse_kill_threshold=3,
+            http_kill_threshold=10
+        )
+        
+    assert mock_check.call_count == 3
+    mock_kill.assert_called_once_with("test-session")
+
+
 def test_call_mcp_tool_reads_only_first_chunk():
     """Wrapper MCP calls should avoid blocking on stream EOF by reading a bounded chunk."""
     from wrapper import _call_mcp_tool_once
