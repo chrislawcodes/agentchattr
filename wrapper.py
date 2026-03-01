@@ -31,6 +31,7 @@ log = logging.getLogger(__name__)
 
 SERVER_NAME = "agentchattr"
 DEFAULT_TRIGGER_COOLDOWN_SECONDS = 2.0
+MCP_TOOL_CALL_TIMEOUT_SECONDS = 5.0
 
 # ---------------------------------------------------------------------------
 # MCP auto-config — ensure .mcp.json and .gemini/settings.json exist
@@ -195,8 +196,13 @@ def _kill_tmux_session(tmux_session: str):
     subprocess.run(["tmux", "kill-session", "-t", tmux_session], capture_output=True)
 
 
-def _call_mcp_tool(mcp_url: str, tool_name: str, arguments: dict | None = None) -> tuple[bool, str]:
-    """Call a local MCP tool over HTTP and return success plus response body."""
+def _call_mcp_tool_once(
+    mcp_url: str,
+    tool_name: str,
+    arguments: dict | None = None,
+    request_timeout: float = MCP_TOOL_CALL_TIMEOUT_SECONDS,
+) -> tuple[bool, str]:
+    """Perform one MCP HTTP tool call attempt."""
     import urllib.error
     import urllib.request
 
@@ -216,7 +222,7 @@ def _call_mcp_tool(mcp_url: str, tool_name: str, arguments: dict | None = None) 
         headers={"Content-Type": "application/json", "Accept": "application/json"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=request_timeout) as resp:
             body = resp.read().decode("utf-8", "replace")
             return 200 <= resp.status < 300, body
     except urllib.error.HTTPError as e:
@@ -225,6 +231,33 @@ def _call_mcp_tool(mcp_url: str, tool_name: str, arguments: dict | None = None) 
     except Exception as e:
         log.warning("MCP tool %s failed: %s", tool_name, e)
         return False, ""
+
+
+def _call_mcp_tool(
+    mcp_url: str,
+    tool_name: str,
+    arguments: dict | None = None,
+    timeout_seconds: float = MCP_TOOL_CALL_TIMEOUT_SECONDS,
+) -> tuple[bool, str]:
+    """Call a local MCP tool over HTTP with a hard wrapper-side deadline."""
+    result: list[tuple[bool, str]] = [(False, "")]
+    done = threading.Event()
+
+    def worker():
+        result[0] = _call_mcp_tool_once(
+            mcp_url,
+            tool_name,
+            arguments=arguments,
+            request_timeout=timeout_seconds,
+        )
+        done.set()
+
+    threading.Thread(target=worker, daemon=True).start()
+    if not done.wait(timeout_seconds):
+        log.warning("MCP tool %s exceeded wrapper timeout (%.1fs)", tool_name, timeout_seconds)
+        return False, ""
+
+    return result[0]
 
 
 def _check_mcp_health(mcp_url: str) -> bool:

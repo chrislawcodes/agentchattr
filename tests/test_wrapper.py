@@ -1,6 +1,7 @@
 """Tests for wrapper.py — cooldown selection and queue watcher logic."""
 
 import sys
+import time
 import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -415,3 +416,24 @@ def test_watch_mcp_health_kills_immediately_on_sse_failure():
         
     mock_check.assert_called_once()
     mock_kill.assert_called_once_with("test-session")
+
+
+def test_call_mcp_tool_fails_fast_when_inner_call_hangs():
+    """Wrapper-side timeout should return quickly even if the HTTP call hangs."""
+    from wrapper import _call_mcp_tool
+
+    def slow_call(*args, **kwargs):
+        time.sleep(0.2)
+        return True, "pong"
+
+    with patch("wrapper._call_mcp_tool_once", side_effect=slow_call), \
+         patch("wrapper.log.warning") as mock_warning:
+        ok, body = _call_mcp_tool(
+            "http://127.0.0.1:8200/mcp",
+            "chat_ping",
+            timeout_seconds=0.05,
+        )
+
+    assert (ok, body) == (False, "")
+    mock_warning.assert_called_once()
+    assert "exceeded wrapper timeout" in mock_warning.call_args[0][0]
