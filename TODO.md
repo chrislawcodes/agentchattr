@@ -148,3 +148,59 @@ See [WORKFLOW.md](WORKFLOW.md) for the full process.
 - **Test plan:** Manual UI test across at least 2 projects; verify history isolation; unit test project switching logic
 - **Branch:** feature/projects
 - **Note:** Implementation complete: project-scoped data dirs, switcher UI, and MCP project support.
+
+---
+
+## Stability Plan
+
+### Background
+
+The system has been accumulating reactive "fix by restarting" logic that makes things *less* stable — each new restart mechanism can fire on false positives and interrupt active agent sessions mid-task. The root principle guiding all fixes below: **"Don't interrupt active work" > "Recover from failures"**.
+
+### What's already been fixed (this session)
+
+**Fix A — Stability logging** (`wrapper.py`, `wrapper_unix.py`, `watchdog.sh`)
+- `wrapper.py` now calls `logging.basicConfig()` — previously `log.info()`/`log.debug()` were silently dropped in the wrapper process (no handler was configured)
+- Per-agent stability log: `data/{agent}_stability.log` — timestamped record of every `[health]`, `[inject]`, `[session]`, and `[kill]` event
+- All stability events now carry a tagged prefix so you can grep for patterns
+- `watchdog.sh` now uses `tee` to log to `data/watchdog.log` with full timestamps
+
+**Fix B — Health watcher kill thresholds** (`wrapper.py` `_watch_mcp_health`)
+- **Before:** SSE kills on **1** failure; HTTP kills after **3** failures × 30s = ~90s
+- **After:** SSE kills after **5 consecutive** failures (~2.5 min); HTTP kills after **10 consecutive** failures (~50 min)
+- Separate counters for SSE and HTTP so a recovery on one doesn't mask failures on the other
+- A single transient blip now logs a warning but never triggers a kill
+
+**Fix C — Smarter watchdog** (`macos-linux/watchdog.sh`)
+- **Before:** If wrapper process died, always restart it (which kills the old tmux session)
+- **After:** If wrapper process died but tmux session is still alive, log `SKIP` and do nothing — the agent is still running
+
+---
+
+### Remaining fixes (for review)
+
+#### Fix D — Chat notifications for stability events
+- **Owner:** Done - Gemini
+- **Scope:** `wrapper.py` — when `_kill_tmux_session` fires (from health watcher or server restart watcher), make an MCP `chat_send` call posting a system-style message to the chat before killing. This makes session kills visible in the UI without requiring anyone to tail log files.
+- **Approach:** Pass `mcp_url` and `agent_name` into the kill callers; call `_call_mcp_tool(mcp_url, "chat_send", {"sender": "system", "message": "..."})` before `_kill_tmux_session`. Best-effort only — don't block or retry on failure.
+- **Acceptance criteria:** When a session is killed by the health watcher or server restart watcher, a message like `"[stability] Killing agentchattr-gemini — 5 consecutive SSE failures"` appears in the chat UI. Session kills via Ctrl+C or normal exit do NOT post messages.
+- **Test plan:** Unit test that the notification helper calls `_call_mcp_tool` with the right args; mock the tool call to avoid needing a live server.
+- **Branch:** `fix/stability-chat-notifications`
+
+---
+
+#### Fix E — Increase task monitor timeout
+- **Owner:** Done - Gemini
+- **Scope:** `config.toml` — raise `agent_task_timeout_minutes` from `5.0` to `15.0`. An agent running a multi-step task easily goes 5 minutes without a new MCP call; the current timeout causes spurious re-injections that interrupt long-running work.
+- **Acceptance criteria:** `config.toml` has `agent_task_timeout_minutes = 15.0`; existing unit tests for the task monitor still pass.
+- **Test plan:** Check `tests/` for task monitor tests; update expected value if hardcoded.
+- **Branch:** `fix/task-monitor-timeout` (or just a direct commit to main)
+
+---
+
+#### Fix F — Make health thresholds configurable
+- **Owner:** Done - Gemini
+- **Scope:** `config.toml` + `wrapper.py` — expose `[mcp] sse_kill_threshold` and `http_kill_threshold` so thresholds can be tuned without code changes. Default to current hardcoded values (5 and 10).
+- **Acceptance criteria:** Setting `sse_kill_threshold = 3` in config.toml is respected by `_watch_mcp_health`; existing behavior unchanged when keys are absent.
+- **Test plan:** Unit test that custom values from config are passed through correctly.
+- **Branch:** `fix/configurable-health-thresholds`
