@@ -20,8 +20,9 @@ restart_agent() {
 }
 
 while true; do
-    wrapper_running claude || restart_agent claude
+    # Claude is excluded — its wrapper kills the active session on restart,
+    # ending the user's conversation. Claude manages its own MCP connection.
     wrapper_running codex || restart_agent codex
-    wrapper_running gemini || restart_agent gemini "--approval-mode yolo"
+    wrapper_running gemini || restart_agent gemini
     sleep 60
 done
