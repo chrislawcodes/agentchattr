@@ -151,6 +151,7 @@ def main():
     parser.add_argument("agent", choices=agent_names,
                         help=f"Agent to wrap ({', '.join(agent_names)})")
     parser.add_argument("--no-restart", action="store_true", help="Don't restart on exit")
+    parser.add_argument("--headless", action="store_true", help="Run without attaching to terminal (for background use)")
     args, extra = parser.parse_known_args()
 
     agent = args.agent
@@ -284,6 +285,7 @@ def main():
         start_watcher=start_watcher,
         strip_env=list(strip_vars),
         pid_holder=_agent_pid,
+        headless=args.headless,
     )
 
     print("  Wrapper stopped.")

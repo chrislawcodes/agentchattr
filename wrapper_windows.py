@@ -167,7 +167,7 @@ def get_activity_checker(pid_holder):
 
 
 
-def run_agent(command, extra_args, cwd, env, queue_file, agent, no_restart, start_watcher, strip_env=None, pid_holder=None):
+def run_agent(command, extra_args, cwd, env, queue_file, agent, no_restart, start_watcher, strip_env=None, pid_holder=None, headless=False):
     """Run agent as a direct subprocess, inject via Win32 console."""
     start_watcher(inject)
 

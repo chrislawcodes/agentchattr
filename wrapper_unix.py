@@ -66,7 +66,7 @@ def get_activity_checker(session_name):
     return check
 
 
-def run_agent(command, extra_args, cwd, env, queue_file, agent, no_restart, start_watcher, strip_env=None, pid_holder=None):
+def run_agent(command, extra_args, cwd, env, queue_file, agent, no_restart, start_watcher, strip_env=None, pid_holder=None, headless=False):
     """Run agent inside a tmux session, inject via tmux send-keys."""
     _check_tmux()
 
@@ -90,9 +90,16 @@ def run_agent(command, extra_args, cwd, env, queue_file, agent, no_restart, star
     inject_fn = lambda text: inject(text, tmux_session=session_name)
     start_watcher(inject_fn)
 
+    # Auto-detect if not explicitly forced
+    if not headless:
+        headless = not sys.stdin.isatty()
+
     print(f"  Using tmux session: {session_name}")
-    print(f"  Detach: Ctrl+B, D  (agent keeps running)")
-    print(f"  Reattach: tmux attach -t {session_name}\n")
+    if headless:
+        print(f"  Running headless")
+    else:
+        print(f"  Detach: Ctrl+B, D  (agent keeps running)")
+        print(f"  Reattach: tmux attach -t {session_name}\n")
 
     while True:
         try:
@@ -112,19 +119,30 @@ def run_agent(command, extra_args, cwd, env, queue_file, agent, no_restart, star
                 print(f"  Error: failed to create tmux session (exit {result.returncode})")
                 break
 
-            # Attach — blocks until agent exits or user detaches (Ctrl+B, D)
-            subprocess.run(["tmux", "attach-session", "-t", session_name])
+            if headless:
+                # No TTY — wait for session to disappear instead of attaching
+                while True:
+                    time.sleep(2)
+                    check = subprocess.run(
+                        ["tmux", "has-session", "-t", session_name],
+                        capture_output=True,
+                    )
+                    if check.returncode != 0:
+                        break
+            else:
+                # Attach — blocks until agent exits or user detaches (Ctrl+B, D)
+                subprocess.run(["tmux", "attach-session", "-t", session_name])
 
-            # Check: did the agent exit, or did the user just detach?
-            check = subprocess.run(
-                ["tmux", "has-session", "-t", session_name],
-                capture_output=True,
-            )
-            if check.returncode == 0:
-                # Session still alive — user detached, agent running in background
-                print(f"\n  Detached. {agent.capitalize()} still running in tmux.")
-                print(f"  Reattach: tmux attach -t {session_name}")
-                break
+                # Check: did the agent exit, or did the user just detach?
+                check = subprocess.run(
+                    ["tmux", "has-session", "-t", session_name],
+                    capture_output=True,
+                )
+                if check.returncode == 0:
+                    # Session still alive — user detached, agent running in background
+                    print(f"\n  Detached. {agent.capitalize()} still running in tmux.")
+                    print(f"  Reattach: tmux attach -t {session_name}")
+                    break
 
             # Session gone — agent exited
             if no_restart:
