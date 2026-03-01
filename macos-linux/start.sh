@@ -54,6 +54,13 @@ start_agent claude
 start_agent codex
 start_agent gemini "--approval-mode yolo"
 
+if ! pgrep -f "/macos-linux/watchdog.sh" >/dev/null 2>&1; then
+    echo "Starting wrapper watchdog..."
+    nohup bash macos-linux/watchdog.sh >> "data/watchdog.log" 2>&1 &
+else
+    echo "Wrapper watchdog already running."
+fi
+
 echo ""
 echo "===================================================="
 echo "  agentchattr started!"
