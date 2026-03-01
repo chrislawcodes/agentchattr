@@ -101,6 +101,82 @@ def _notify_recovery(data_dir: Path, agent_name: str):
         pass
 
 
+def _kill_tmux_session(tmux_session: str):
+    """Kill a tmux session so the wrapper's restart loop recreates it."""
+    if sys.platform == "win32":
+        return
+    subprocess.run(["tmux", "kill-session", "-t", tmux_session], capture_output=True)
+
+
+def _check_mcp_health(mcp_url: str) -> bool:
+    """Return True when the local MCP HTTP endpoint responds to chat_ping."""
+    import urllib.request
+    import json
+    payload = json.dumps({
+        "jsonrpc": "2.0",
+        "id": "health-check",
+        "method": "tools/call",
+        "params": {"name": "chat_ping", "arguments": {}},
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        mcp_url, data=payload, method="POST",
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = resp.read().decode("utf-8", "replace")
+            return 200 <= resp.status < 300 and "pong" in body
+    except Exception:
+        return False
+
+
+def _check_sse_health(sse_url: str) -> bool:
+    """Return True when the SSE endpoint returns 200 OK (checked via GET)."""
+    import urllib.request
+    try:
+        req = urllib.request.Request(sse_url, method="GET")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
+
+def _watch_mcp_health(mcp_url: str, tmux_session: str, stop_event: threading.Event, sse_url: str = None):
+    """Restart the tmux session after repeated consecutive health check failures."""
+    http_failures = 0
+    sse_failures = 0
+
+    # Grace period so the local MCP server can finish booting before checks start.
+    if stop_event.wait(60):
+        return
+
+    while not stop_event.is_set():
+        if sse_url:
+            if _check_sse_health(sse_url):
+                sse_failures = 0
+            else:
+                sse_failures += 1
+                if sse_failures >= 5:
+                    print(f"  [health] {tmux_session} SSE failed 5 times — killing session")
+                    _kill_tmux_session(tmux_session)
+                    sse_failures = 0
+                    if stop_event.wait(60): break
+                    continue
+
+        if _check_mcp_health(mcp_url):
+            http_failures = 0
+        else:
+            http_failures += 1
+            if http_failures >= 10:
+                print(f"  [health] {tmux_session} HTTP failed 10 times — killing session")
+                _kill_tmux_session(tmux_session)
+                http_failures = 0
+
+        interval = 30 if sse_url else 300
+        if stop_event.wait(interval):
+            break
+
+
 def _queue_watcher(queue_file: Path, agent_name: str, inject_fn):
     """Poll queue file; call inject_fn('chat - use mcp') when triggered."""
     while True:
@@ -231,6 +307,22 @@ def main():
 
     monitor = threading.Thread(target=_watcher_monitor, daemon=True)
     monitor.start()
+
+    # Start health watcher — kills tmux session after sustained health failures
+    # so the agent process reconnects with a fresh MCP session
+    _stop_event = threading.Event()
+    tmux_session = f"agentchattr-{agent}"
+    mcp_http_url = f"http://127.0.0.1:{mcp_cfg.get('http_port', 8200)}/mcp"
+    mcp_sse_url = None
+    if agent == "gemini":
+        mcp_sse_url = f"http://127.0.0.1:{mcp_cfg.get('sse_port', 8201)}/sse"
+
+    health_watcher = threading.Thread(
+        target=_watch_mcp_health,
+        args=(mcp_http_url, tmux_session, _stop_event, mcp_sse_url),
+        daemon=True,
+    )
+    health_watcher.start()
 
     # Activity monitor — detect terminal output and report to server
     _activity_checker = None
