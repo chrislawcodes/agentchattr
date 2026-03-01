@@ -99,8 +99,9 @@ def test_server_watch_sends_c_after_second_cycle(tmp_path):
 
     stop_event.wait = fake_wait
 
-    with patch("subprocess.run", side_effect=fake_subprocess_run):
-        _watch_for_server_restart(tmp_path, "agentchattr-test", stop_event)
+    with patch("subprocess.run", side_effect=fake_subprocess_run), \
+         patch("wrapper._notify_stability_event"):
+        _watch_for_server_restart("http://dummy/mcp", tmp_path, "agentchattr-test", stop_event)
 
     assert len(sent_c) == 1, "tmux kill-session should be sent exactly once after second cycle"
 
@@ -134,7 +135,8 @@ def test_server_watch_does_not_send_c_on_first_cycle(tmp_path):
 
     stop_event.wait = fake_wait
 
-    with patch("subprocess.run", side_effect=fake_subprocess_run):
-        _watch_for_server_restart(tmp_path, "agentchattr-test", stop_event)
+    with patch("subprocess.run", side_effect=fake_subprocess_run), \
+         patch("wrapper._notify_stability_event"):
+        _watch_for_server_restart("http://dummy/mcp", tmp_path, "agentchattr-test", stop_event)
 
     assert len(sent_c) == 0, "C-c should NOT be sent on first detection cycle"

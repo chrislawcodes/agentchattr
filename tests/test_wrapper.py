@@ -362,9 +362,10 @@ def test_watch_for_server_restart_triggers_on_change(tmp_path):
     stop_event = MagicMock()
     # is_set() is checked at loop start and after wait(). 
     # Return False enough times to allow 3 full cycles.
-    stop_event.is_set.side_effect = [False] * 10 
-    
-    with patch("subprocess.run") as mock_run:
+    stop_event.is_set.side_effect = [False] * 10
+
+    with patch("subprocess.run") as mock_run, \
+         patch("wrapper._notify_stability_event"):
         def wait_side_effect(timeout):
             if wait_side_effect.call_count == 1:
                 # After first cycle wait, change the timestamp
@@ -375,15 +376,14 @@ def test_watch_for_server_restart_triggers_on_change(tmp_path):
             elif wait_side_effect.call_count == 3:
                 # After third cycle (restart sent), signal loop stop
                 stop_event.is_set.side_effect = [True] * 10
-            
+
             wait_side_effect.call_count += 1
             return False
 
         wait_side_effect.call_count = 0
         stop_event.wait.side_effect = wait_side_effect
-        
-        _watch_for_server_restart(data_dir, "test-session", stop_event)
 
+        _watch_for_server_restart("http://dummy/mcp", data_dir, "test-session", stop_event)
     waited_for = [c.args[0] for c in stop_event.wait.call_args_list[:2]]
     assert waited_for == [10.0, 10.0], f"Expected 10s confirmation cycles, got {waited_for}"
 
@@ -513,3 +513,14 @@ def test_announce_join_stops_after_retry_limit():
 
     assert mock_call.call_count == 3
     assert mock_sleep.call_count == 2
+
+def test_notify_stability_event():
+    """Verify _notify_stability_event calls _call_mcp_tool correctly."""
+    from wrapper import _notify_stability_event
+    with patch("wrapper._call_mcp_tool") as mock_call:
+        _notify_stability_event("http://test/mcp", "test-session", "test reason")
+        mock_call.assert_called_once_with(
+            "http://test/mcp", 
+            "chat_send", 
+            {"sender": "system", "message": "[stability] Killing test-session — test reason"}
+        )

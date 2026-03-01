@@ -319,7 +319,15 @@ def _announce_join(mcp_url: str, agent_name: str):
 # so the agent reconnects with a fresh MCP session instead of using stale IDs
 # ---------------------------------------------------------------------------
 
-def _watch_for_server_restart(data_dir: Path, tmux_session: str, stop_event: threading.Event):
+def _notify_stability_event(mcp_url: str, tmux_session: str, reason: str):
+    """Post a system message to chat before killing a session."""
+    msg = f"[stability] Killing {tmux_session} — {reason}"
+    try:
+        _call_mcp_tool(mcp_url, "chat_send", {"sender": "system", "message": msg})
+    except Exception as e:
+        log.warning("Failed to send stability notification: %s", e)
+
+def _watch_for_server_restart(mcp_url: str, data_dir: Path, tmux_session: str, stop_event: threading.Event):
     """Detect server restarts and kill the tmux session so the agent reconnects.
 
     Waits one extra 10s cycle after detecting a change to confirm the server is
@@ -341,6 +349,7 @@ def _watch_for_server_restart(data_dir: Path, tmux_session: str, stop_event: thr
             if pending_restart:
                 # Second consecutive 10s cycle with new timestamp — server is stable, restart
                 log.info("Server restart confirmed after 20s — restarting tmux session %s", tmux_session)
+                _notify_stability_event(mcp_url, tmux_session, "server restart detected")
                 _kill_tmux_session(tmux_session)
                 known_start = current
                 pending_restart = False
@@ -388,6 +397,7 @@ def _watch_mcp_health(mcp_url: str, tmux_session: str, stop_event: threading.Eve
                     tmux_session, sse_failures, SSE_KILL_THRESHOLD,
                 )
                 if sse_failures >= SSE_KILL_THRESHOLD:
+                    _notify_stability_event(mcp_url, tmux_session, f"{sse_failures} consecutive SSE failures")
                     _kill_tmux_session(tmux_session)
                     sse_failures = 0
                     # Wait for recovery before resuming checks
@@ -410,6 +420,7 @@ def _watch_mcp_health(mcp_url: str, tmux_session: str, stop_event: threading.Eve
                 tmux_session, http_failures, HTTP_KILL_THRESHOLD,
             )
             if http_failures >= HTTP_KILL_THRESHOLD:
+                _notify_stability_event(mcp_url, tmux_session, f"{http_failures} consecutive HTTP failures")
                 _kill_tmux_session(tmux_session)
                 http_failures = 0
 
@@ -563,7 +574,7 @@ def main():
 
     server_watcher = threading.Thread(
         target=_watch_for_server_restart,
-        args=(data_dir, tmux_session, _stop_event),
+        args=(mcp_http_url, data_dir, tmux_session, _stop_event),
         daemon=True,
     )
     server_watcher.start()
