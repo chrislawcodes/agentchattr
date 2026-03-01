@@ -349,7 +349,7 @@ def test_inject_windows_sends_escape_before_text():
 
 
 def test_watch_for_server_restart_triggers_on_change(tmp_path):
-    """Verify that _watch_for_server_restart sends C-c after 2 cycles of a changed timestamp."""
+    """Verify that _watch_for_server_restart kills the session after 2 cycles of a changed timestamp."""
     from wrapper import _watch_for_server_restart
     
     data_dir = tmp_path / "data"
@@ -383,7 +383,10 @@ def test_watch_for_server_restart_triggers_on_change(tmp_path):
         stop_event.wait.side_effect = wait_side_effect
         
         _watch_for_server_restart(data_dir, "test-session", stop_event)
-        
+
+    waited_for = [c.args[0] for c in stop_event.wait.call_args_list[:2]]
+    assert waited_for == [10.0, 10.0], f"Expected 10s confirmation cycles, got {waited_for}"
+
     # Verify kill-session was sent exactly once to the correct session
     kill_calls = [c for c in mock_run.call_args_list if "kill-session" in str(c[0][0])]
     assert len(kill_calls) == 1, f"Expected 1 kill-session call, got {len(kill_calls)}"

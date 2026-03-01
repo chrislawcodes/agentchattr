@@ -67,7 +67,7 @@ def test_token_written_even_when_keychain_fails(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_server_watch_sends_c_after_second_cycle(tmp_path):
-    """C-c is sent only on the second consecutive cycle with a changed timestamp."""
+    """kill-session is sent only on the second consecutive 10s cycle with a changed timestamp."""
     from wrapper import _watch_for_server_restart
 
     started_at = tmp_path / "server_started_at.txt"
@@ -106,7 +106,7 @@ def test_server_watch_sends_c_after_second_cycle(tmp_path):
 
 
 def test_server_watch_does_not_send_c_on_first_cycle(tmp_path):
-    """tmux kill-session is NOT sent on the first cycle after timestamp change."""
+    """tmux kill-session is NOT sent on the first 10s detection cycle after timestamp change."""
     from wrapper import _watch_for_server_restart
 
     started_at = tmp_path / "server_started_at.txt"

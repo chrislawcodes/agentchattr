@@ -32,6 +32,7 @@ log = logging.getLogger(__name__)
 SERVER_NAME = "agentchattr"
 DEFAULT_TRIGGER_COOLDOWN_SECONDS = 2.0
 MCP_TOOL_CALL_TIMEOUT_SECONDS = 5.0
+RESTART_WATCH_INTERVAL_SECONDS = 10.0
 
 # ---------------------------------------------------------------------------
 # MCP auto-config — ensure .mcp.json and .gemini/settings.json exist
@@ -288,7 +289,7 @@ def _announce_join(mcp_url: str, agent_name: str):
 def _watch_for_server_restart(data_dir: Path, tmux_session: str, stop_event: threading.Event):
     """Detect server restarts and kill the tmux session so the agent reconnects.
 
-    Waits one extra cycle after detecting a change to confirm the server is
+    Waits one extra 10s cycle after detecting a change to confirm the server is
     stable before restarting — avoids killing agents during server mid-boot.
     """
     started_at_file = data_dir / "server_started_at.txt"
@@ -296,7 +297,7 @@ def _watch_for_server_restart(data_dir: Path, tmux_session: str, stop_event: thr
     pending_restart = False
 
     while not stop_event.is_set():
-        stop_event.wait(30)
+        stop_event.wait(RESTART_WATCH_INTERVAL_SECONDS)
         if stop_event.is_set():
             break
         if not started_at_file.exists():
@@ -305,14 +306,14 @@ def _watch_for_server_restart(data_dir: Path, tmux_session: str, stop_event: thr
         current = started_at_file.read_text().strip()
         if current != known_start:
             if pending_restart:
-                # Second consecutive cycle with new timestamp — server is stable, restart
-                log.info("Server restart confirmed — restarting tmux session %s", tmux_session)
+                # Second consecutive 10s cycle with new timestamp — server is stable, restart
+                log.info("Server restart confirmed after 20s — restarting tmux session %s", tmux_session)
                 _kill_tmux_session(tmux_session)
                 known_start = current
                 pending_restart = False
             else:
-                # First detection — wait one more cycle to confirm
-                log.info("Server restart detected for %s — confirming next cycle", tmux_session)
+                # First detection — wait one more 10s cycle to confirm
+                log.info("Server restart detected for %s — confirming in 10s", tmux_session)
                 pending_restart = True
         else:
             pending_restart = False
