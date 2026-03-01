@@ -1,7 +1,6 @@
 """Tests for wrapper.py — cooldown selection and queue watcher logic."""
 
 import sys
-import time
 import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -418,22 +417,37 @@ def test_watch_mcp_health_kills_immediately_on_sse_failure():
     mock_kill.assert_called_once_with("test-session")
 
 
-def test_call_mcp_tool_fails_fast_when_inner_call_hangs():
-    """Wrapper-side timeout should return quickly even if the HTTP call hangs."""
-    from wrapper import _call_mcp_tool
+def test_call_mcp_tool_reads_only_first_chunk():
+    """Wrapper MCP calls should avoid blocking on stream EOF by reading a bounded chunk."""
+    from wrapper import _call_mcp_tool_once
 
-    def slow_call(*args, **kwargs):
-        time.sleep(0.2)
-        return True, "pong"
+    mock_resp = MagicMock()
+    mock_resp.__enter__.return_value = mock_resp
+    mock_resp.__exit__.return_value = False
+    mock_resp.status = 200
+    mock_resp.read.return_value = b"pong"
 
-    with patch("wrapper._call_mcp_tool_once", side_effect=slow_call), \
-         patch("wrapper.log.warning") as mock_warning:
-        ok, body = _call_mcp_tool(
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        ok, body = _call_mcp_tool_once(
             "http://127.0.0.1:8200/mcp",
             "chat_ping",
-            timeout_seconds=0.05,
         )
 
-    assert (ok, body) == (False, "")
-    mock_warning.assert_called_once()
-    assert "exceeded wrapper timeout" in mock_warning.call_args[0][0]
+    assert (ok, body) == (True, "pong")
+    mock_resp.read.assert_called_once_with(4096)
+
+
+def test_check_sse_health_sends_event_stream_accept_header():
+    """Gemini SSE health probes must request the SSE media type."""
+    from wrapper import _check_sse_health
+
+    mock_resp = MagicMock()
+    mock_resp.__enter__.return_value = mock_resp
+    mock_resp.__exit__.return_value = False
+    mock_resp.status = 200
+
+    with patch("urllib.request.urlopen", return_value=mock_resp) as mock_urlopen:
+        assert _check_sse_health("http://127.0.0.1:8201/sse") is True
+
+    req = mock_urlopen.call_args[0][0]
+    assert req.headers["Accept"] == "text/event-stream"

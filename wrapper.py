@@ -223,7 +223,9 @@ def _call_mcp_tool_once(
     )
     try:
         with urllib.request.urlopen(req, timeout=request_timeout) as resp:
-            body = resp.read().decode("utf-8", "replace")
+            # Read only the first chunk so streamable HTTP responses don't block
+            # waiting for EOF on a long-lived connection.
+            body = resp.read(4096).decode("utf-8", "replace")
             return 200 <= resp.status < 300, body
     except urllib.error.HTTPError as e:
         log.warning("MCP tool %s failed with HTTP %s", tool_name, e.code)
@@ -239,25 +241,13 @@ def _call_mcp_tool(
     arguments: dict | None = None,
     timeout_seconds: float = MCP_TOOL_CALL_TIMEOUT_SECONDS,
 ) -> tuple[bool, str]:
-    """Call a local MCP tool over HTTP with a hard wrapper-side deadline."""
-    result: list[tuple[bool, str]] = [(False, "")]
-    done = threading.Event()
-
-    def worker():
-        result[0] = _call_mcp_tool_once(
-            mcp_url,
-            tool_name,
-            arguments=arguments,
-            request_timeout=timeout_seconds,
-        )
-        done.set()
-
-    threading.Thread(target=worker, daemon=True).start()
-    if not done.wait(timeout_seconds):
-        log.warning("MCP tool %s exceeded wrapper timeout (%.1fs)", tool_name, timeout_seconds)
-        return False, ""
-
-    return result[0]
+    """Call a local MCP tool over HTTP."""
+    return _call_mcp_tool_once(
+        mcp_url,
+        tool_name,
+        arguments=arguments,
+        request_timeout=timeout_seconds,
+    )
 
 
 def _check_mcp_health(mcp_url: str) -> bool:
@@ -270,7 +260,11 @@ def _check_sse_health(sse_url: str) -> bool:
     """Return True when the SSE endpoint returns 200 OK (checked via GET)."""
     import urllib.request
     try:
-        req = urllib.request.Request(sse_url, method="GET")
+        req = urllib.request.Request(
+            sse_url,
+            method="GET",
+            headers={"Accept": "text/event-stream"},
+        )
         with urllib.request.urlopen(req, timeout=5) as resp:
             return resp.status == 200
     except Exception:
