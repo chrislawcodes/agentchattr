@@ -242,6 +242,11 @@ def _touch_presence(name: str):
         _presence[name] = time.time()
 
 
+def record_presence(name: str):
+    """Record that an agent is online without marking as busy."""
+    _touch_presence(name)
+
+
 def _get_online() -> list[str]:
     now = time.time()
     with _presence_lock:

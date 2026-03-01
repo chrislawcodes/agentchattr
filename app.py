@@ -156,7 +156,7 @@ def _install_security_middleware(token: str, cfg: dict):
             # Static assets, index page, and uploaded images are public.
             # The index page injects the token client-side via same-origin script.
             # Uploads use random filenames and have path-traversal protection.
-            if path == "/" or path.startswith(("/static/", "/uploads/", "/api/heartbeat/")):
+            if path == "/" or path.startswith(("/static/", "/uploads/", "/api/heartbeat/", "/api/internal/")):
                 return await call_next(request)
 
             # --- Origin check (blocks cross-origin / DNS-rebinding attacks) ---
@@ -845,6 +845,17 @@ async def delete_hat(agent_name: str):
     """Remove an agent's hat (called by the trash-can UI)."""
     clear_agent_hat(agent_name)
     return JSONResponse({"ok": True})
+
+
+@app.post("/api/internal/heartbeat")
+async def internal_heartbeat(body: dict):
+    """Wrapper calls this to keep presence alive."""
+    agent_name = body.get("agent")
+    if not agent_name:
+        return JSONResponse({"error": "agent name required"}, status_code=400)
+    import mcp_bridge
+    mcp_bridge.record_presence(agent_name)
+    return {"ok": True}
 
 
 @app.post("/api/heartbeat/{agent_name}")

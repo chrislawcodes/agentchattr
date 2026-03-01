@@ -101,6 +101,34 @@ def _notify_recovery(data_dir: Path, agent_name: str):
         pass
 
 
+def _call_server_rest(url: str, payload: dict) -> bool:
+    """POST JSON to a server REST endpoint."""
+    import urllib.request
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5):
+            return True
+    except Exception:
+        return False
+
+
+def _announce_presence(server_url: str, agent_name: str):
+    """Update agent presence via server REST heartbeat endpoint."""
+    ok = _call_server_rest(
+        f"{server_url}/api/internal/heartbeat",
+        {"agent": agent_name},
+    )
+    if not ok:
+        # Silently fail for now — server might be starting
+        pass
+
+
 def _queue_watcher(queue_file: Path, agent_name: str, inject_fn):
     """Poll queue file; call inject_fn('chat - use mcp') when triggered."""
     while True:
@@ -190,18 +218,17 @@ def main():
 
     # Heartbeat — ping the server every 60s to keep presence alive
     server_port = config.get("server", {}).get("port", 8300)
+    server_host = config.get("server", {}).get("host", "127.0.0.1")
+    server_url = f"http://{server_host}:{server_port}"
 
     def _heartbeat():
-        import urllib.request
-        url = f"http://127.0.0.1:{server_port}/api/heartbeat/{agent}"
         while True:
-            try:
-                req = urllib.request.Request(url, method="POST", data=b"")
-                urllib.request.urlopen(req, timeout=5)
-            except Exception:
-                pass
+            # Announce presence periodically
+            _announce_presence(server_url, agent)
             time.sleep(60)
 
+    # Initial announce
+    _announce_presence(server_url, agent)
     threading.Thread(target=_heartbeat, daemon=True).start()
 
     # Helper: start the queue watcher with a given inject function
